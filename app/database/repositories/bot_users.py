@@ -18,6 +18,7 @@ class BotUserRepository:
         telegram_chat_id: int,
         username: str | None,
         first_name: str | None,
+        is_access_admin: bool = False,
     ) -> BotUser:
         statement = insert(BotUser).values(
             telegram_user_id=telegram_user_id,
@@ -25,6 +26,7 @@ class BotUserRepository:
             username=username,
             first_name=first_name,
             is_active=True,
+            is_access_admin=is_access_admin,
         )
         statement = statement.on_conflict_do_update(
             index_elements=[BotUser.telegram_user_id],
@@ -33,6 +35,8 @@ class BotUserRepository:
                 "username": statement.excluded.username,
                 "first_name": statement.excluded.first_name,
                 "is_active": True,
+                "is_access_admin": BotUser.is_access_admin
+                | statement.excluded.is_access_admin,
                 "updated_at": func.now(),
             },
         )

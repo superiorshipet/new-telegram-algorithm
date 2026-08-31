@@ -48,7 +48,8 @@ def access_list_keyboard(grants: list[BotAccessGrant]) -> InlineKeyboardMarkup:
                     f"إلغاء @{grant.subject_value}"
                     if grant.subject_type == "username"
                     else f"إلغاء {grant.subject_value}"
-                ),
+                )
+                + (" (مشرف)" if grant.is_access_admin else ""),
                 callback_data=f"access:revoke:{grant.id}",
             )
         ]
@@ -65,7 +66,14 @@ def create_registration_router(
 ) -> Router:
     router = Router(name="registration")
 
-    async def register_user(message: Message) -> int:
+    async def can_manage_access(telegram_user_id: int) -> bool:
+        if telegram_user_id == owner_telegram_id:
+            return True
+        async with session_factory() as session:
+            user = await BotUserRepository(session).get_by_telegram_id(telegram_user_id)
+        return bool(user and user.is_active and user.is_access_admin)
+
+    async def register_user(message: Message, *, is_access_admin: bool) -> int:
         assert message.from_user is not None
         async with session_factory() as session:
             user_repository = BotUserRepository(session)
@@ -74,6 +82,7 @@ def create_registration_router(
                 telegram_chat_id=message.chat.id,
                 username=message.from_user.username,
                 first_name=message.from_user.first_name,
+                is_access_admin=is_access_admin,
             )
             default_count = 0
             if user.default_filter_version < DEFAULT_FILTER_VERSION:
@@ -92,15 +101,16 @@ def create_registration_router(
             return
 
         is_owner = message.from_user.id == owner_telegram_id
+        access_grant = None
         if not is_owner:
             async with session_factory() as session:
-                authorized = await BotAccessRepository(session).authorize_and_bind(
+                access_grant = await BotAccessRepository(session).authorize_and_bind(
                     message.from_user.id,
                     message.from_user.username,
                 )
-                if authorized:
+                if access_grant is not None:
                     await session.commit()
-            if not authorized:
+            if access_grant is None:
                 logger.warning(
                     "unauthorized_bot_access",
                     extra={"telegram_user_id": message.from_user.id},
@@ -108,7 +118,8 @@ def create_registration_router(
                 await message.answer("هذا البوت خاص وغير متاح لهذا الحساب.")
                 return
 
-        default_count = await register_user(message)
+        is_access_admin = is_owner or bool(access_grant and access_grant.is_access_admin)
+        default_count = await register_user(message, is_access_admin=is_access_admin)
         logger.info(
             "bot_user_registered",
             extra={"telegram_user_id": message.from_user.id},
@@ -117,21 +128,21 @@ def create_registration_router(
         await message.answer(
             f"تم تسجيل حسابك وتفعيل الإشعارات.{default_message} "
             "استخدم /filters لإدارة اهتماماتك.",
-            reply_markup=owner_access_keyboard() if is_owner else None,
+            reply_markup=owner_access_keyboard() if is_access_admin else None,
         )
 
     @router.message(Command("access"))
     async def access_command(message: Message, state: FSMContext) -> None:
-        if message.from_user is None or message.from_user.id != owner_telegram_id:
-            await message.answer("إدارة الصلاحيات متاحة للمالك فقط.")
+        if message.from_user is None or not await can_manage_access(message.from_user.id):
+            await message.answer("إدارة الصلاحيات متاحة للمشرفين فقط.")
             return
         await state.clear()
         await message.answer("إدارة المستخدمين المصرح لهم:", reply_markup=owner_access_keyboard())
 
     @router.callback_query(F.data == "access:add")
     async def start_access_grant(callback: CallbackQuery, state: FSMContext) -> None:
-        if callback.from_user.id != owner_telegram_id:
-            await callback.answer("هذا الخيار للمالك فقط.", show_alert=True)
+        if not await can_manage_access(callback.from_user.id):
+            await callback.answer("هذا الخيار للمشرفين فقط.", show_alert=True)
             return
         await state.clear()
         await state.set_state(AccessStates.waiting_for_subject)
@@ -144,7 +155,7 @@ def create_registration_router(
 
     @router.message(AccessStates.waiting_for_subject, F.text)
     async def receive_access_subject(message: Message, state: FSMContext) -> None:
-        if message.from_user is None or message.from_user.id != owner_telegram_id:
+        if message.from_user is None or not await can_manage_access(message.from_user.id):
             await state.clear()
             return
         try:
@@ -161,7 +172,7 @@ def create_registration_router(
 
     @router.message(AccessStates.waiting_for_password, F.text)
     async def confirm_access_grant(message: Message, state: FSMContext) -> None:
-        if message.from_user is None or message.from_user.id != owner_telegram_id:
+        if message.from_user is None or not await can_manage_access(message.from_user.id):
             await state.clear()
             return
         supplied_password = message.text or ""
@@ -182,7 +193,7 @@ def create_registration_router(
             return
         subject = AccessSubject(subject_type, subject_value)
         async with session_factory() as session:
-            await BotAccessRepository(session).grant(subject, owner_telegram_id)
+            await BotAccessRepository(session).grant(subject, message.from_user.id)
             await session.commit()
         await state.clear()
         logger.info("bot_access_granted", extra={"subject_type": subject.subject_type})
@@ -193,8 +204,8 @@ def create_registration_router(
 
     @router.callback_query(F.data == "access:list")
     async def list_access_grants(callback: CallbackQuery) -> None:
-        if callback.from_user.id != owner_telegram_id:
-            await callback.answer("هذا الخيار للمالك فقط.", show_alert=True)
+        if not await can_manage_access(callback.from_user.id):
+            await callback.answer("هذا الخيار للمشرفين فقط.", show_alert=True)
             return
         async with session_factory() as session:
             grants = await BotAccessRepository(session).list_active()
@@ -208,8 +219,8 @@ def create_registration_router(
 
     @router.callback_query(F.data.startswith("access:revoke:"))
     async def revoke_access(callback: CallbackQuery) -> None:
-        if callback.from_user.id != owner_telegram_id:
-            await callback.answer("هذا الخيار للمالك فقط.", show_alert=True)
+        if not await can_manage_access(callback.from_user.id):
+            await callback.answer("هذا الخيار للمشرفين فقط.", show_alert=True)
             return
         try:
             grant_id = uuid.UUID((callback.data or "").rsplit(":", 1)[-1])
@@ -225,11 +236,9 @@ def create_registration_router(
 
     @router.message(Command("help"))
     async def help_command(message: Message) -> None:
-        owner_help = (
-            "\n/access — إدارة المستخدمين المصرح لهم"
-            if message.from_user and message.from_user.id == owner_telegram_id
-            else ""
-        )
+        access_help = ""
+        if message.from_user and await can_manage_access(message.from_user.id):
+            access_help = "\n/access — إدارة المستخدمين المصرح لهم"
         await message.answer(
             "/start — تسجيل الحساب أو إعادة تفعيله\n"
             "/filters — إدارة كلمات وعبارات البحث\n"
@@ -237,7 +246,7 @@ def create_registration_router(
             "/saved — الرسائل المحفوظة\n"
             "/status — حالة الحساب\n"
             "/stop — إيقاف الإشعارات\n"
-            f"/help — عرض الأوامر{owner_help}"
+            f"/help — عرض الأوامر{access_help}"
         )
 
     return router

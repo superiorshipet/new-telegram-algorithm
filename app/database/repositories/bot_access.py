@@ -39,23 +39,34 @@ class BotAccessRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def grant(self, subject: AccessSubject, granted_by: int) -> BotAccessGrant:
+    async def grant(
+        self,
+        subject: AccessSubject,
+        granted_by: int,
+        *,
+        is_access_admin: bool = False,
+    ) -> BotAccessGrant:
         statement = insert(BotAccessGrant).values(
             subject_type=subject.subject_type,
             subject_value=subject.subject_value,
             granted_by_telegram_user_id=granted_by,
             is_active=True,
+            is_access_admin=is_access_admin,
         )
         statement = statement.on_conflict_do_update(
             constraint="uq_bot_access_grants_subject",
             set_={
                 "granted_by_telegram_user_id": statement.excluded.granted_by_telegram_user_id,
                 "is_active": True,
+                "is_access_admin": BotAccessGrant.is_access_admin
+                | statement.excluded.is_access_admin,
             },
         )
         return (await self._session.execute(statement.returning(BotAccessGrant))).scalar_one()
 
-    async def authorize_and_bind(self, telegram_user_id: int, username: str | None) -> bool:
+    async def authorize_and_bind(
+        self, telegram_user_id: int, username: str | None
+    ) -> BotAccessGrant | None:
         id_value = str(telegram_user_id)
         id_grant = await self._session.scalar(
             select(BotAccessGrant)
@@ -64,11 +75,11 @@ class BotAccessRepository:
             .where(BotAccessGrant.is_active.is_(True))
         )
         if id_grant is not None:
-            return True
+            return id_grant
 
         normalized_username = (username or "").strip().lstrip("@").casefold()
         if not normalized_username:
-            return False
+            return None
         username_grant = await self._session.scalar(
             select(BotAccessGrant)
             .where(BotAccessGrant.subject_type == "username")
@@ -77,14 +88,15 @@ class BotAccessRepository:
             .with_for_update()
         )
         if username_grant is None:
-            return False
+            return None
 
-        await self.grant(
+        id_grant = await self.grant(
             AccessSubject("telegram_id", id_value),
             username_grant.granted_by_telegram_user_id,
+            is_access_admin=username_grant.is_access_admin,
         )
         username_grant.is_active = False
-        return True
+        return id_grant
 
     async def list_active(self) -> list[BotAccessGrant]:
         result = await self._session.scalars(
