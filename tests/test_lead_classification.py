@@ -1,3 +1,5 @@
+import pytest
+
 from app.bot.services import default_filter_values
 from app.filtering import build_text_fingerprint, classify_lead, normalize_arabic
 
@@ -36,6 +38,41 @@ def test_custom_keyword_still_requires_request_context() -> None:
 
     assert result.is_lead is True
     assert result.matched_keywords == ("خبير شبكات",)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        (
+            "هو أهم من اختيار الشبكة المواصفات حجم الرام، "
+            "أنا عندي لابتوب ديل gaming قوي بصراحة"
+        ),
+        "انا باذن الله، لكن عندي كلاس الساعة ١ بالتحضيري اخاف اتأخر",
+        "تفضل هذا المشروع الذي تحدثنا عنه",
+        "الدكتور يشرح برنامج اليوم",
+    ],
+)
+def test_informational_keyword_context_does_not_alert(text: str) -> None:
+    result = classify_lead(normalize_arabic(text), normalized_default_keywords())
+
+    assert result.matched_keywords
+    assert result.is_lead is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "احتاج شخص يصمم لي عرض للمشروع",
+        "حد فاهم اكسل يساعدني في واجب؟",
+        "يشرح واجب رياضيات؟",
+    ],
+)
+def test_keyword_with_request_intent_and_context_alerts(text: str) -> None:
+    result = classify_lead(normalize_arabic(text), normalized_default_keywords())
+
+    assert result.is_lead is True
+    assert result.matched_keywords
+    assert result.matched_intents
 
 
 def test_text_fingerprint_is_independent_from_group_identity() -> None:

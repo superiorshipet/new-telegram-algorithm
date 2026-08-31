@@ -10,15 +10,14 @@ STRONG_REQUEST_PHRASES = (
     "من يعرف",
     "مين يسوي",
     "من يقدر",
-    "تعرفون",
     "احتاج احد",
     "ابحث عن",
     "مطلوب",
     "احد يسوي",
     "حد يسوي",
     "حد فاهم",
+    "حد يفهم",
     "يساعدني",
-    "عندي",
 )
 
 REQUEST_VERBS = (
@@ -40,6 +39,17 @@ REQUEST_VERBS = (
     "يساعد",
     "تساعد",
     "يحله",
+    "تعرفون",
+)
+
+REQUEST_MARKERS = (
+    "مين",
+    "من",
+    "احد",
+    "حد",
+    "ممكن",
+    "لو سمحت",
+    "لو سمحتم",
 )
 
 
@@ -64,6 +74,11 @@ def _contains_phrase(text: str, phrase: str) -> bool:
     return re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text) is not None
 
 
+def _starts_with_phrase(text: str, phrase: str) -> bool:
+    stripped = text.lstrip(" \t\n.,،:؛!?؟-_ـ")
+    return re.match(rf"{re.escape(phrase)}(?!\w)", stripped) is not None
+
+
 def classify_lead(normalized_text: str, keywords: list[str]) -> LeadMatch:
     matched_keywords = tuple(
         keyword for keyword in keywords if _contains_phrase(normalized_text, keyword)
@@ -76,7 +91,17 @@ def classify_lead(normalized_text: str, keywords: list[str]) -> LeadMatch:
     context_keywords = tuple(
         keyword for keyword in matched_keywords if keyword not in matched_intents
     )
-    has_request_context = bool(context_keywords) or len(normalized_text.split()) >= 3
+    word_count = len(normalized_text.split())
+    has_explicit_request_context = bool(strong_intents) and (
+        bool(context_keywords) or word_count >= 3
+    )
+    has_verb_request_context = bool(verb_intents and context_keywords) and (
+        any(_starts_with_phrase(normalized_text, verb) for verb in verb_intents)
+        or any(_contains_phrase(normalized_text, marker) for marker in REQUEST_MARKERS)
+        or "?" in normalized_text
+        or "؟" in normalized_text
+    )
+    has_request_context = has_explicit_request_context or has_verb_request_context
 
     score = min(len(matched_keywords), 3) * 2
     if strong_intents:
