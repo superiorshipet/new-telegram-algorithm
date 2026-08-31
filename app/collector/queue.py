@@ -52,12 +52,13 @@ class MessageQueue:
                 raise
             except Exception as exc:  # noqa: BLE001 - durable writer retry boundary
                 logger.error(
-                    "message_persist_failed",
+                    "message_persist_failed error_code=%s attempt=%d",
+                    type(exc).__name__,
+                    attempt,
                     extra={
                         "telegram_chat_id": item.telegram_chat_id,
                         "telegram_message_id": item.telegram_message_id,
                         "attempt": attempt,
-                        "error_code": type(exc).__name__,
                     },
                 )
                 await asyncio.sleep(min(2 ** min(attempt - 1, 4), 15))

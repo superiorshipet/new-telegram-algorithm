@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from telethon import TelegramClient, events
-from telethon.errors import FloodWaitError
+from telethon.errors import AuthKeyError, FloodWaitError
 from telethon.sessions import StringSession
 
 from app.collector.handlers import create_new_message_handler
@@ -38,6 +38,7 @@ class CollectorClientManager:
         return len(self._clients)
 
     async def _start_account(self, account: SourceAccount) -> None:
+        client: TelegramClient | None = None
         try:
             api_id = int(self._cipher.decrypt(account.api_id_encrypted))
             api_hash = self._cipher.decrypt(account.api_hash_encrypted)
@@ -57,13 +58,22 @@ class CollectorClientManager:
                 )
                 return
 
-            self._clients.append(client)
             await self._set_status(account, "connected", connected=True)
+            self._clients.append(client)
             logger.info(
                 "source_account_connected",
                 extra={"source_account_id": str(account.id)},
             )
+        except AuthKeyError as exc:
+            await self._disconnect_failed_client(client)
+            await self._set_status(account, "unauthorized")
+            logger.error(
+                "source_account_session_invalid error_code=%s",
+                type(exc).__name__,
+                extra={"source_account_id": str(account.id)},
+            )
         except FloodWaitError as exc:
+            await self._disconnect_failed_client(client)
             until = datetime.now(UTC) + timedelta(seconds=exc.seconds)
             await self._set_status(account, "flood_wait", flood_wait_until=until)
             logger.warning(
@@ -74,13 +84,26 @@ class CollectorClientManager:
                 },
             )
         except Exception as exc:  # noqa: BLE001 - account isolation boundary
+            await self._disconnect_failed_client(client)
             await self._set_status(account, "error")
             logger.error(
-                "source_account_connection_failed",
+                "source_account_connection_failed error_code=%s",
+                type(exc).__name__,
                 extra={
                     "source_account_id": str(account.id),
-                    "error_code": type(exc).__name__,
                 },
+            )
+
+    @staticmethod
+    async def _disconnect_failed_client(client: TelegramClient | None) -> None:
+        if client is None:
+            return
+        try:
+            await client.disconnect()
+        except Exception as exc:  # noqa: BLE001 - preserve original connection failure
+            logger.error(
+                "failed_client_cleanup error_code=%s",
+                type(exc).__name__,
             )
 
     async def _set_status(
