@@ -120,13 +120,22 @@ def test_message_format_and_buttons_include_expected_actions() -> None:
     assert saved_keyboard.inline_keyboard[0][0].callback_data == f"unsave:{message.id}"
 
 
-def test_filter_keyboards_expose_add_confirm_and_cancel_actions() -> None:
+def test_filter_keyboards_expose_add_remove_confirm_and_cancel_actions() -> None:
     menu = filters_menu_keyboard()
-    confirmation = filters_confirmation_keyboard()
+    add_confirmation = filters_confirmation_keyboard()
+    remove_confirmation = filters_confirmation_keyboard("remove")
 
     assert menu.inline_keyboard[0][0].callback_data == "filters:add:start"
-    assert confirmation.inline_keyboard[0][0].callback_data == "filters:add:confirm"
-    assert confirmation.inline_keyboard[0][1].callback_data == "filters:add:cancel"
+    assert menu.inline_keyboard[0][1].callback_data == "filters:remove:start"
+    assert add_confirmation.inline_keyboard[0][0].callback_data == "filters:add:confirm"
+    assert add_confirmation.inline_keyboard[0][1].callback_data == "filters:add:cancel"
+    assert remove_confirmation.inline_keyboard[0][0].callback_data == "filters:remove:confirm"
+    assert remove_confirmation.inline_keyboard[0][1].callback_data == "filters:remove:cancel"
+
+
+def test_filter_confirmation_keyboard_rejects_unknown_action() -> None:
+    with pytest.raises(ValueError, match="Unsupported"):
+        filters_confirmation_keyboard("clear")
 
 
 def test_lead_notification_contains_required_sender_and_repeat_details() -> None:

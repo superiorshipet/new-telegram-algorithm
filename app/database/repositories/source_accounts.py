@@ -23,6 +23,12 @@ class SourceAccountRepository:
         )
         return list(result)
 
+    async def list_all(self) -> list[SourceAccount]:
+        result = await self._session.scalars(
+            select(SourceAccount).order_by(SourceAccount.created_at, SourceAccount.name)
+        )
+        return list(result)
+
     async def set_status(
         self,
         account_id: uuid.UUID,

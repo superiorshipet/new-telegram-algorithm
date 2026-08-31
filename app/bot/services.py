@@ -174,25 +174,32 @@ def filters_menu_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="➕ Add",
+                    text="➕ إضافة فلاتر",
                     callback_data="filters:add:start",
-                )
+                ),
+                InlineKeyboardButton(
+                    text="🗑 حذف فلاتر",
+                    callback_data="filters:remove:start",
+                ),
             ]
         ]
     )
 
 
-def filters_confirmation_keyboard() -> InlineKeyboardMarkup:
+def filters_confirmation_keyboard(action: str = "add") -> InlineKeyboardMarkup:
+    if action not in {"add", "remove"}:
+        raise ValueError("Unsupported filter action")
+    confirm_text = "✅ إضافة" if action == "add" else "🗑 حذف"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Add",
-                    callback_data="filters:add:confirm",
+                    text=confirm_text,
+                    callback_data=f"filters:{action}:confirm",
                 ),
                 InlineKeyboardButton(
-                    text="❌ Cancel",
-                    callback_data="filters:add:cancel",
+                    text="❌ إلغاء",
+                    callback_data=f"filters:{action}:cancel",
                 ),
             ]
         ]

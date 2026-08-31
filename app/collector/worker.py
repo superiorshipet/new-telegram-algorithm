@@ -32,7 +32,11 @@ async def run() -> None:
 
     try:
         started = await manager.start_enabled()
-        logger.info("collector_started", extra={"connected_accounts": started})
+        logger.info(
+            "collector_started connected_accounts=%d",
+            started,
+            extra={"connected_accounts": started},
+        )
         await stop_event.wait()
     finally:
         logger.info("collector_stopping")

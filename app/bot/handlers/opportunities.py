@@ -96,6 +96,7 @@ def create_opportunities_router(
             return
 
         await state.clear()
+        await state.update_data(filter_action="add")
         await state.set_state(FilterStates.waiting_for_values)
         await callback.answer()
         await callback.bot.send_message(
@@ -103,6 +104,31 @@ def create_opportunities_router(
             "اكتب الكلمات أو الجمل التي تريد إضافتها في رسالة واحدة.\n\n"
             "افصل بينها بسطر جديد أو فاصلة , أو فاصلة عربية ،\n\n"
             "مثال:\nPython developer\n.NET\nتصميم مواقع",
+        )
+
+    @router.callback_query(F.data == "filters:remove:start")
+    async def start_filter_removal(callback: CallbackQuery, state: FSMContext) -> None:
+        async with session_factory() as session:
+            user = await _registered_user(session, callback.from_user.id)
+            if user is None:
+                await callback.answer("استخدم /start أولًا.", show_alert=True)
+                return
+            current = await BotFeatureRepository(session).list_keywords(user.id)
+
+        if not current:
+            await callback.answer("لا توجد فلاتر لحذفها.", show_alert=True)
+            return
+
+        await state.clear()
+        await state.update_data(filter_action="remove")
+        await state.set_state(FilterStates.waiting_for_values)
+        await callback.answer()
+        current_values = format_filter_list([item.keyword for item in current])
+        await callback.bot.send_message(
+            callback.from_user.id,
+            f"فلاترك الحالية ({len(current)}):\n{current_values}\n\n"
+            "اكتب الكلمات أو الجمل التي تريد حذفها في رسالة واحدة.\n"
+            "افصل بينها بسطر جديد أو فاصلة , أو فاصلة عربية ،",
         )
 
     @router.message(FilterStates.waiting_for_values, F.text)
@@ -123,34 +149,59 @@ def create_opportunities_router(
                 return
             current = await BotFeatureRepository(session).list_keywords(user.id)
 
-        existing = {item.normalized_keyword for item in current}
-        new_values = [item for item in parsed_values if item[1] not in existing]
-        if not new_values:
-            await message.answer("كل الكلمات موجودة بالفعل. أرسل كلمات أو جمل أخرى.")
-            return
+        state_data = await state.get_data()
+        action = state_data.get("filter_action", "add")
+        existing = {item.normalized_keyword: item.keyword for item in current}
+        if action == "remove":
+            selected_values = [
+                (existing[normalized], normalized)
+                for _, normalized in parsed_values
+                if normalized in existing
+            ]
+            if not selected_values:
+                await message.answer(
+                    "لم أجد أيًا من هذه الكلمات ضمن فلاترك. أرسل كلمات محفوظة بالفعل."
+                )
+                return
+            operation = "حذف"
+        else:
+            selected_values = [item for item in parsed_values if item[1] not in existing]
+            if not selected_values:
+                await message.answer("كل الكلمات موجودة بالفعل. أرسل كلمات أو جمل أخرى.")
+                return
+            action = "add"
+            operation = "إضافة"
 
-        await state.update_data(filter_draft=message.text)
+        await state.update_data(filter_draft=message.text, filter_action=action)
         await state.set_state(FilterStates.waiting_for_confirmation)
-        preview = format_filter_list([keyword for keyword, _ in new_values])
+        preview = format_filter_list([keyword for keyword, _ in selected_values])
         await message.answer(
-            f"سيتم إضافة {len(new_values)} فلتر:\n\n{preview}\n\nاضغط Add لتطبيقهم.",
-            reply_markup=filters_confirmation_keyboard(),
+            f"سيتم {operation} {len(selected_values)} فلتر:\n\n{preview}\n\n"
+            f"اضغط {operation} للتأكيد.",
+            reply_markup=filters_confirmation_keyboard(action),
         )
 
     @router.message(FilterStates.waiting_for_values)
     async def reject_non_text_filter_values(message: Message) -> None:
         await message.answer("أرسل الكلمات والجمل كنص في رسالة واحدة.")
 
-    @router.callback_query(F.data == "filters:add:confirm")
+    @router.callback_query(
+        F.data.in_({"filters:add:confirm", "filters:remove:confirm"})
+    )
     async def confirm_filter_values(callback: CallbackQuery, state: FSMContext) -> None:
         if await state.get_state() != FilterStates.waiting_for_confirmation.state:
             await callback.answer("انتهت هذه العملية. افتح /filters من جديد.", show_alert=True)
             return
         data = await state.get_data()
         draft = data.get("filter_draft")
-        if not isinstance(draft, str):
+        action = data.get("filter_action")
+        callback_action = (callback.data or "").split(":")[1]
+        if not isinstance(draft, str) or action not in {"add", "remove"}:
             await state.clear()
             await callback.answer("انتهت هذه العملية. حاول من جديد.", show_alert=True)
+            return
+        if callback_action != action:
+            await callback.answer("زر التأكيد لا يخص العملية الحالية.", show_alert=True)
             return
 
         parsed_values = parse_filter_values(draft)
@@ -163,24 +214,38 @@ def create_opportunities_router(
             repository = BotFeatureRepository(session)
             current = await repository.list_keywords(user.id)
             existing = {item.normalized_keyword for item in current}
-            new_values = [item for item in parsed_values if item[1] not in existing]
-            inserted = await repository.add_keywords(user.id, new_values)
+            if action == "add":
+                new_values = [item for item in parsed_values if item[1] not in existing]
+                changed = await repository.add_keywords(user.id, new_values)
+            else:
+                changed = 0
+                for _, normalized in parsed_values:
+                    if normalized in existing:
+                        changed += int(await repository.remove_keyword(user.id, normalized))
             await session.commit()
 
         await state.clear()
-        await callback.answer(f"تمت إضافة {inserted} فلتر.")
+        operation = "إضافة" if action == "add" else "حذف"
+        await callback.answer(f"تم {operation} {changed} فلتر.")
         await callback.bot.send_message(
             callback.from_user.id,
-            f"تم تطبيق {inserted} فلتر بنجاح. استخدم /latest لعرض النتائج.",
+            f"تم {operation} {changed} فلتر بنجاح."
+            + (" استخدم /latest لعرض النتائج." if action == "add" else ""),
         )
 
-    @router.callback_query(F.data == "filters:add:cancel")
+    @router.callback_query(
+        F.data.in_({"filters:add:cancel", "filters:remove:cancel"})
+    )
     async def cancel_filter_values(callback: CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        action = data.get("filter_action")
         await state.clear()
         await callback.answer("تم الإلغاء.")
         await callback.bot.send_message(
             callback.from_user.id,
-            "تم إلغاء الإضافة ولم يتم حفظ أي فلتر.",
+            "تم إلغاء العملية ولم يتم تغيير أي فلتر."
+            if action in {"add", "remove"}
+            else "تم إلغاء العملية.",
         )
 
     @router.message(Command("latest"))
@@ -296,12 +361,11 @@ def create_opportunities_router(
 
 def _filters_menu_text(current: list[BotUserKeyword]) -> str:
     if not current:
-        return "لا توجد فلاتر حاليًا.\n\nاضغط Add لإضافة الكلمات أو الجمل التي تريدها."
+        return "لا توجد فلاتر حاليًا.\n\nاضغط إضافة فلاتر لإضافة الكلمات أو الجمل التي تريدها."
     values = format_filter_list([item.keyword for item in current])
     return (
         f"فلاترك الحالية ({len(current)}):\n{values}\n\n"
-        "اضغط Add لإضافة المزيد.\n"
-        "للحذف: /filters remove الكلمة\n"
+        "استخدم الأزرار لإضافة فلاتر أو حذف فلاتر معينة.\n"
         "لحذف الكل: /filters clear"
     )
 
