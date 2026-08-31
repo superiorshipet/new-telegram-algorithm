@@ -2,11 +2,16 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.models import CollectedMessage, TelegramGroup
+from app.database.models import (
+    CollectedMessage,
+    MessageObservation,
+    NotificationOutbox,
+    TelegramGroup,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,13 +29,21 @@ class NewCollectedMessage:
     message_date: datetime
     source_account_id: uuid.UUID
     content_hash: str
+    text_fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
+class PersistedMessage:
+    message_id: uuid.UUID
+    message_inserted: bool
+    observation_inserted: bool
 
 
 class MessageRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def save_if_new(self, item: NewCollectedMessage) -> bool:
+    async def save_if_new(self, item: NewCollectedMessage) -> PersistedMessage:
         group_insert = insert(TelegramGroup).values(
             telegram_chat_id=item.telegram_chat_id,
             title=item.group_title,
@@ -61,6 +74,7 @@ class MessageRepository:
                 message_date=item.message_date,
                 source_account_id=item.source_account_id,
                 content_hash=item.content_hash,
+                text_fingerprint=item.text_fingerprint,
             )
             .on_conflict_do_nothing(
                 index_elements=[
@@ -70,4 +84,40 @@ class MessageRepository:
             )
             .returning(CollectedMessage.id)
         )
-        return (await self._session.execute(message_insert)).scalar_one_or_none() is not None
+        message_id = (await self._session.execute(message_insert)).scalar_one_or_none()
+        message_inserted = message_id is not None
+        if message_id is None:
+            message_id = await self._session.scalar(
+                select(CollectedMessage.id)
+                .where(CollectedMessage.telegram_group_id == group_id)
+                .where(CollectedMessage.telegram_message_id == item.telegram_message_id)
+            )
+            if message_id is None:
+                raise RuntimeError("Deduplicated Telegram message could not be resolved")
+
+        observation_insert = (
+            insert(MessageObservation)
+            .values(
+                collected_message_id=message_id,
+                source_account_id=item.source_account_id,
+            )
+            .on_conflict_do_nothing(constraint="uq_message_observations_message_source")
+            .returning(MessageObservation.id)
+        )
+        observation_inserted = (
+            await self._session.execute(observation_insert)
+        ).scalar_one_or_none() is not None
+
+        if message_inserted:
+            await self._session.execute(
+                insert(NotificationOutbox).values(
+                    collected_message_id=message_id,
+                    available_at=func.now() + text("interval '1 second'"),
+                )
+            )
+
+        return PersistedMessage(
+            message_id=message_id,
+            message_inserted=message_inserted,
+            observation_inserted=observation_inserted,
+        )

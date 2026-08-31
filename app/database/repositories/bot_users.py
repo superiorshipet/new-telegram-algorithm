@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,9 +36,7 @@ class BotUserRepository:
                 "updated_at": func.now(),
             },
         )
-        return (
-            await self._session.execute(statement.returning(BotUser))
-        ).scalar_one()
+        return (await self._session.execute(statement.returning(BotUser))).scalar_one()
 
     async def get_by_telegram_id(self, telegram_user_id: int) -> BotUser | None:
         return await self._session.scalar(
@@ -52,9 +52,13 @@ class BotUserRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    async def mark_default_filters_seeded(self, bot_user_id: object) -> None:
+    async def mark_default_filters_seeded(self, bot_user_id: uuid.UUID, version: int) -> None:
         await self._session.execute(
             update(BotUser)
             .where(BotUser.id == bot_user_id)
-            .values(default_filters_seeded=True, updated_at=func.now())
+            .values(
+                default_filters_seeded=True,
+                default_filter_version=version,
+                updated_at=func.now(),
+            )
         )

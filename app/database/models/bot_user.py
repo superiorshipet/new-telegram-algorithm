@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, String, text
+from sqlalchemy import BigInteger, Boolean, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -16,4 +16,7 @@ class BotUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     default_filters_seeded: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
+    )
+    default_filter_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
     )

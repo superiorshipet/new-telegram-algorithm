@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     database_url: SecretStr
     bot_token: SecretStr | None = None
+    bot_owner_telegram_id: int | None = None
     master_encryption_key: SecretStr | None = None
     log_level: str = "INFO"
     collector_queue_size: int = Field(default=1000, ge=1, le=100_000)
@@ -61,6 +62,11 @@ class Settings(BaseSettings):
         if self.bot_token is None or not self.bot_token.get_secret_value():
             raise RuntimeError("BOT_TOKEN is required by the bot worker")
         return self.bot_token.get_secret_value()
+
+    def require_bot_owner_telegram_id(self) -> int:
+        if self.bot_owner_telegram_id is None or self.bot_owner_telegram_id <= 0:
+            raise RuntimeError("BOT_OWNER_TELEGRAM_ID is required by the bot worker")
+        return self.bot_owner_telegram_id
 
     def require_encryption_key(self) -> str:
         if self.master_encryption_key is None or not self.master_encryption_key.get_secret_value():

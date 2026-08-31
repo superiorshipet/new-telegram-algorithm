@@ -23,6 +23,8 @@ def test_service_specific_secrets_are_optional_until_worker_start() -> None:
     settings = Settings(database_url="postgresql://user:pass@db/app", _env_file=None)
     with pytest.raises(RuntimeError, match="BOT_TOKEN"):
         settings.require_bot_token()
+    with pytest.raises(RuntimeError, match="BOT_OWNER_TELEGRAM_ID"):
+        settings.require_bot_owner_telegram_id()
     with pytest.raises(RuntimeError, match="MASTER_ENCRYPTION_KEY"):
         settings.require_encryption_key()
     with pytest.raises(RuntimeError, match="TG_API_ID"):

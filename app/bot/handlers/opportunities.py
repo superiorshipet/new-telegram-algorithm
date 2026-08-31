@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.bot.services import (
     filters_confirmation_keyboard,
     filters_menu_keyboard,
-    format_filter_list,
     format_collected_message,
+    format_filter_list,
     message_keyboard,
     parse_filter_command,
     parse_filter_values,
@@ -36,9 +36,12 @@ async def _registered_user(session: AsyncSession, telegram_user_id: int) -> BotU
 
 def create_opportunities_router(
     session_factory: async_sessionmaker[AsyncSession],
+    owner_telegram_id: int,
 ) -> Router:
     router = Router(name="opportunities")
     router.message.filter(F.chat.type == "private")
+    router.message.filter(F.from_user.id == owner_telegram_id)
+    router.callback_query.filter(F.from_user.id == owner_telegram_id)
 
     @router.message(Command("filters"))
     async def filters_command(message: Message, command: CommandObject, state: FSMContext) -> None:
@@ -279,10 +282,7 @@ def create_opportunities_router(
 
 def _filters_menu_text(current: list[BotUserKeyword]) -> str:
     if not current:
-        return (
-            "لا توجد فلاتر حاليًا.\n\n"
-            "اضغط Add لإضافة الكلمات أو الجمل التي تريدها."
-        )
+        return "لا توجد فلاتر حاليًا.\n\nاضغط Add لإضافة الكلمات أو الجمل التي تريدها."
     values = format_filter_list([item.keyword for item in current])
     return (
         f"فلاترك الحالية ({len(current)}):\n{values}\n\n"

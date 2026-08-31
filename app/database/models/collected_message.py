@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -17,7 +18,7 @@ from sqlalchemy import (
 from sqlalchemy import (
     text as sql_text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.base import Base, UUIDPrimaryKeyMixin
@@ -37,6 +38,11 @@ class CollectedMessage(UUIDPrimaryKeyMixin, Base):
         ),
         Index("ix_collected_messages_content_hash", "content_hash"),
         Index("ix_collected_messages_message_date", "message_date"),
+        Index(
+            "ix_collected_messages_sender_fingerprint",
+            "sender_telegram_id",
+            "text_fingerprint",
+        ),
     )
 
     telegram_group_id: Mapped[uuid.UUID] = mapped_column(
@@ -62,9 +68,17 @@ class CollectedMessage(UUIDPrimaryKeyMixin, Base):
         index=True,
     )
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    text_fingerprint: Mapped[str | None] = mapped_column(String(64))
     preliminary_score: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=sql_text("0")
     )
+    is_lead: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sql_text("false"), index=True
+    )
+    matched_keywords: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=sql_text("'[]'::jsonb")
+    )
+    match_reason: Mapped[str | None] = mapped_column(Text)
 
     group: Mapped[TelegramGroup] = relationship(back_populates="messages")
     source_account: Mapped[SourceAccount] = relationship(back_populates="messages")

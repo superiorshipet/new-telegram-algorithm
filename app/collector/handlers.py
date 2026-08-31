@@ -9,7 +9,11 @@ from telethon.events import NewMessage
 
 from app.collector.queue import MessageQueue
 from app.database.repositories.messages import NewCollectedMessage
-from app.filtering import build_content_hash, normalize_arabic
+from app.filtering import (
+    build_content_hash,
+    build_text_fingerprint,
+    normalize_arabic,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,17 +68,19 @@ def create_new_message_handler(
                     message_date=event.message.date,
                     source_account_id=source_account_id,
                     content_hash=build_content_hash(chat_id, message_id, normalized_text),
+                    text_fingerprint=build_text_fingerprint(normalized_text),
                 )
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.exception(
+        except Exception as exc:  # noqa: BLE001 - Telegram event boundary
+            logger.error(
                 "telegram_message_handler_failed",
                 extra={
                     "telegram_chat_id": event.chat_id,
                     "telegram_message_id": getattr(event.message, "id", None),
                     "source_account_id": str(source_account_id),
+                    "error_code": type(exc).__name__,
                 },
             )
 

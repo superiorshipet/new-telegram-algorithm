@@ -83,6 +83,7 @@ class BotFeatureRepository:
         statement = (
             select(CollectedMessage)
             .options(joinedload(CollectedMessage.group))
+            .where(CollectedMessage.is_lead.is_(True))
             .order_by(CollectedMessage.message_date.desc())
             .limit(limit)
         )

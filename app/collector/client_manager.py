@@ -73,11 +73,14 @@ class CollectorClientManager:
                     "wait_seconds": exc.seconds,
                 },
             )
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - account isolation boundary
             await self._set_status(account, "error")
-            logger.exception(
+            logger.error(
                 "source_account_connection_failed",
-                extra={"source_account_id": str(account.id)},
+                extra={
+                    "source_account_id": str(account.id),
+                    "error_code": type(exc).__name__,
+                },
             )
 
     async def _set_status(
@@ -101,6 +104,9 @@ class CollectorClientManager:
         for client in self._clients:
             try:
                 await client.disconnect()
-            except Exception:
-                logger.exception("source_account_disconnect_failed")
+            except Exception as exc:  # noqa: BLE001 - shutdown must continue
+                logger.error(
+                    "source_account_disconnect_failed",
+                    extra={"error_code": type(exc).__name__},
+                )
         self._clients.clear()

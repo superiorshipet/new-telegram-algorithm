@@ -31,41 +31,36 @@ class MessageQueue:
                 self._queue.task_done()
 
     async def _persist_with_retry(self, item: NewCollectedMessage) -> None:
-        for attempt in range(1, 6):
+        attempt = 0
+        while True:
+            attempt += 1
             try:
                 async with self._session_factory() as session:
-                    inserted = await MessageRepository(session).save_if_new(item)
+                    result = await MessageRepository(session).save_if_new(item)
                     await session.commit()
                 logger.info(
                     "message_persisted",
                     extra={
                         "telegram_chat_id": item.telegram_chat_id,
                         "telegram_message_id": item.telegram_message_id,
-                        "inserted": inserted,
+                        "message_inserted": result.message_inserted,
+                        "observation_inserted": result.observation_inserted,
                     },
                 )
                 return
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                logger.exception(
+            except Exception as exc:  # noqa: BLE001 - durable writer retry boundary
+                logger.error(
                     "message_persist_failed",
                     extra={
                         "telegram_chat_id": item.telegram_chat_id,
                         "telegram_message_id": item.telegram_message_id,
                         "attempt": attempt,
+                        "error_code": type(exc).__name__,
                     },
                 )
-                if attempt == 5:
-                    logger.error(
-                        "message_discarded_after_retries",
-                        extra={
-                            "telegram_chat_id": item.telegram_chat_id,
-                            "telegram_message_id": item.telegram_message_id,
-                        },
-                    )
-                    return
-                await asyncio.sleep(min(2 ** (attempt - 1), 15))
+                await asyncio.sleep(min(2 ** min(attempt - 1, 4), 15))
 
     async def join(self) -> None:
         await self._queue.join()

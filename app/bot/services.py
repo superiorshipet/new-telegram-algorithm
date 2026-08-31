@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import UTC
+from zoneinfo import ZoneInfo
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -12,7 +13,7 @@ from app.filtering import normalize_arabic
 MAX_FILTER_LENGTH = 100
 _FILTER_SEPARATOR = re.compile(r"[,،\n]+")
 
-DEFAULT_FILTER_KEYWORDS = (
+DEFAULT_FILTER_KEYWORDS_V1 = (
     "يسوي",
     "تسوي",
     "بحث",
@@ -78,6 +79,27 @@ DEFAULT_FILTER_KEYWORDS = (
     "عندي",
 )
 
+DEFAULT_FILTER_KEYWORDS_V2 = (
+    "يسويه",
+    "يسويلي",
+    "مشروعي",
+    "من يعرف",
+    "من يقدر",
+    "مين يسوي",
+    "خصوصيه",
+    "يساعدني",
+    "الاكسل",
+    "سيرة ذاتيه",
+    "يحله",
+)
+
+DEFAULT_FILTER_SETS = {
+    1: DEFAULT_FILTER_KEYWORDS_V1,
+    2: DEFAULT_FILTER_KEYWORDS_V2,
+}
+DEFAULT_FILTER_VERSION = max(DEFAULT_FILTER_SETS)
+DEFAULT_FILTER_KEYWORDS = DEFAULT_FILTER_KEYWORDS_V1 + DEFAULT_FILTER_KEYWORDS_V2
+
 
 @dataclass(frozen=True, slots=True)
 class FilterCommand:
@@ -118,14 +140,20 @@ def parse_filter_values(raw_keywords: str) -> list[tuple[str, str]]:
 
 
 def default_filter_values() -> list[tuple[str, str]]:
-    return [
-        (keyword, normalize_arabic(keyword)) for keyword in DEFAULT_FILTER_KEYWORDS
+    return default_filter_values_since(0)
+
+
+def default_filter_values_since(version: int) -> list[tuple[str, str]]:
+    keywords = [
+        keyword
+        for filter_version, values in DEFAULT_FILTER_SETS.items()
+        if filter_version > version
+        for keyword in values
     ]
+    return parse_filter_values("\n".join(keywords))
 
 
-def format_filter_list(
-    keywords: list[str], *, max_characters: int = 3000
-) -> str:
+def format_filter_list(keywords: list[str], *, max_characters: int = 3000) -> str:
     lines: list[str] = []
     used_characters = 0
     for keyword in keywords:
@@ -192,3 +220,67 @@ def message_keyboard(message: CollectedMessage, *, saved: bool = False) -> Inlin
             InlineKeyboardButton(text="فتح الرسالة الأصلية", url=message.original_message_link)
         )
     return InlineKeyboardMarkup(inline_keyboard=[buttons])
+
+
+def format_lead_notification(
+    message: CollectedMessage,
+    *,
+    observer_names: list[str],
+    repeated_group_count: int,
+    matched_keywords: tuple[str, ...],
+    latency_ms: int,
+) -> str:
+    request_text = message.text.strip() or "[رسالة بدون نص]"
+    if len(request_text) > 2400:
+        request_text = f"{request_text[:2397]}..."
+    username = f"@{message.sender_username}" if message.sender_username else "غير متوفر"
+    sender_id = str(message.sender_telegram_id) if message.sender_telegram_id else "غير متوفر"
+    observed_at = message.collected_at.astimezone(ZoneInfo("Africa/Cairo"))
+    observed_time = observed_at.strftime("%I:%M %p").replace("AM", "ص").replace("PM", "م")
+    observers = "، ".join(observer_names) if observer_names else "غير معروف"
+    reason = "، ".join(matched_keywords) if matched_keywords else "سياق طلب"
+    repetition = (
+        f"\n🔁 كرر الطالب نفس الطلب في {repeated_group_count} مجموعات"
+        if repeated_group_count > 1
+        else ""
+    )
+
+    return (
+        "🔔 طلب جديد\n"
+        f"👤 المرسل: {message.sender_name or 'غير معروف'}\n"
+        f"🆔 User ID: {sender_id}\n"
+        f"📱 Username: {username}\n"
+        f"📦 المجموعة: {message.group.title}\n"
+        "✉️ الطلب:\n"
+        f"{request_text}\n"
+        f"🕐 وقت الرصد: {observed_time}\n"
+        f"🤖 الحساب الراصد: {observers}\n"
+        f"🎯 سبب الالتقاط: {reason}"
+        f"{repetition}\n"
+        f"⚡ زمن الوصول: {latency_ms} ms\n"
+        "━━━━━━━━━━━━━━\n"
+        "💾 تم حفظ بيانات المرسل"
+    )
+
+
+def lead_notification_keyboard(
+    message: CollectedMessage,
+) -> InlineKeyboardMarkup | None:
+    rows: list[list[InlineKeyboardButton]] = []
+    if message.original_message_link:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="📩 فتح الرسالة",
+                    url=message.original_message_link,
+                )
+            ]
+        )
+    sender_url: str | None = None
+    if message.sender_username:
+        sender_url = f"https://t.me/{message.sender_username}"
+    elif message.sender_telegram_id:
+        sender_url = f"tg://user?id={message.sender_telegram_id}"
+    if sender_url:
+        rows.append([InlineKeyboardButton(text="👤 فتح حساب الطالب", url=sender_url)])
+    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None

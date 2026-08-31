@@ -1,6 +1,6 @@
 from sqlalchemy import UniqueConstraint
 
-from app.database.models import CollectedMessage
+from app.database.models import CollectedMessage, MessageObservation, NotificationOutbox
 from app.filtering.rules import build_content_hash, message_identity
 
 
@@ -29,3 +29,24 @@ def test_database_enforces_atomic_group_message_uniqueness() -> None:
         "telegram_group_id",
         "telegram_message_id",
     )
+
+
+def test_each_source_account_can_observe_same_message_only_once() -> None:
+    constraints = {
+        constraint.name: tuple(column.name for column in constraint.columns)
+        for constraint in MessageObservation.__table__.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert constraints["uq_message_observations_message_source"] == (
+        "collected_message_id",
+        "source_account_id",
+    )
+
+
+def test_only_one_outbox_notification_exists_per_message() -> None:
+    constraints = {
+        tuple(column.name for column in constraint.columns)
+        for constraint in NotificationOutbox.__table__.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert ("collected_message_id",) in constraints
