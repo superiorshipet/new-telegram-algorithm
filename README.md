@@ -4,11 +4,12 @@ A Python 3.12 monorepo with two independently deployable Railway workers:
 
 - `collector-worker` connects authorized Telegram user accounts in read-only mode,
   listens for new group messages, and persists them through a bounded queue.
-- `bot-worker` registers private-chat users by immutable Telegram user/chat IDs.
+- `bot-worker` registers private-chat users, manages their filters, and provides matching
+  and saved opportunities.
 - PostgreSQL stores shared source accounts, groups, messages, and bot users.
 
-Notification delivery and advanced user filters are intentionally outside this first
-milestone.
+Automatic push delivery is intentionally outside this milestone; users can already browse
+matching messages through `/latest` and keep selected results through `/saved`.
 
 ## Security model
 
@@ -89,7 +90,24 @@ one-off deployment command before starting the workers. Do not run migrations co
 from both workers.
 
 The bot username is presentation metadata managed by BotFather; application code only
-requires `BOT_TOKEN`. Open the bot in a private chat and send `/start` to register.
+requires `BOT_TOKEN`. At startup the worker synchronizes the supported BotFather command
+menu automatically. Open the bot in a private chat and send `/start` to register.
+
+## Bot commands
+
+- `/start` registers a new user or reactivates notifications for an existing user.
+- `/filters` lists current keywords and displays usage help.
+- `/filters add Python, .NET, تصميم مواقع` adds up to 20 unique keywords or phrases.
+- `/filters remove Python` removes one or more comma-separated filters.
+- `/filters clear` removes every filter.
+- `/latest` displays the five newest messages matching any configured filter. With no
+  filters it displays the five newest collected messages.
+- `/saved` displays the ten most recently saved messages.
+- `/status` displays registration, notification, filter, and saved-message status.
+- `/stop` pauses future push notifications; `/start` reactivates them.
+
+Messages returned by `/latest` contain a save button and, when available, a link to the
+original Telegram message. Saved results contain a remove button.
 
 ## Deduplication and processing
 

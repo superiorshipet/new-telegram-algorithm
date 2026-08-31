@@ -1,4 +1,4 @@
-from sqlalchemy import func
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,3 +35,17 @@ class BotUserRepository:
             },
         )
         await self._session.execute(statement)
+
+    async def get_by_telegram_id(self, telegram_user_id: int) -> BotUser | None:
+        return await self._session.scalar(
+            select(BotUser).where(BotUser.telegram_user_id == telegram_user_id)
+        )
+
+    async def set_notifications_active(self, telegram_user_id: int, *, active: bool) -> bool:
+        result = await self._session.execute(
+            update(BotUser)
+            .where(BotUser.telegram_user_id == telegram_user_id)
+            .values(is_active=active, updated_at=func.now())
+            .returning(BotUser.id)
+        )
+        return result.scalar_one_or_none() is not None

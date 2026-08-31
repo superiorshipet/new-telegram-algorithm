@@ -35,16 +35,18 @@ def create_registration_router(
             "bot_user_registered",
             extra={"telegram_user_id": message.from_user.id},
         )
-        await message.answer(
-            "Registration complete. You will be able to receive matching "
-            "opportunities here when notification delivery is enabled."
-        )
+        await message.answer("تم تسجيل حسابك وتفعيل الإشعارات. استخدم /filters لإضافة اهتماماتك.")
 
     @router.message(Command("help"))
     async def help_command(message: Message) -> None:
         await message.answer(
-            "/start — register or reactivate your account\n"
-            "/help — show the currently available commands"
+            "/start — تسجيل الحساب أو إعادة تفعيله\n"
+            "/filters — إدارة كلمات وعبارات البحث\n"
+            "/latest — أحدث الفرص المطابقة\n"
+            "/saved — الرسائل المحفوظة\n"
+            "/status — حالة الحساب\n"
+            "/stop — إيقاف الإشعارات\n"
+            "/help — عرض الأوامر"
         )
 
     return router
