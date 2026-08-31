@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert
@@ -14,13 +13,6 @@ from app.database.models import SourceAccount
 from app.database.session import Database
 
 
-def require_environment(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise RuntimeError(f"{name} is required")
-    return value
-
-
 def mask_phone(phone: str) -> str:
     if len(phone) <= 4:
         return "*" * len(phone)
@@ -30,12 +22,10 @@ def mask_phone(phone: str) -> str:
 async def run() -> None:
     settings = get_settings()
     encryption_key = settings.require_encryption_key()
-    api_id_text = require_environment("TG_API_ID")
-    api_hash = require_environment("TG_API_HASH")
-    phone = require_environment("TG_PHONE")
-    account_name = require_environment("SOURCE_ACCOUNT_NAME")
+    api_id, api_hash, phone, account_name = settings.require_session_generation_values()
+    api_id_text = str(api_id)
 
-    client = TelegramClient(StringSession(), int(api_id_text), api_hash)
+    client = TelegramClient(StringSession(), api_id, api_hash)
     try:
         await client.start(phone=phone)
         session_string = client.session.save()
