@@ -276,11 +276,22 @@ def lead_notification_keyboard(
                 )
             ]
         )
-    sender_url: str | None = None
     if message.sender_username:
-        sender_url = f"https://t.me/{message.sender_username}"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="👤 فتح حساب الطالب",
+                    url=f"https://t.me/{message.sender_username}",
+                )
+            ]
+        )
     elif message.sender_telegram_id:
-        sender_url = f"tg://user?id={message.sender_telegram_id}"
-    if sender_url:
-        rows.append([InlineKeyboardButton(text="👤 فتح حساب الطالب", url=sender_url)])
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🆔 بيانات الطالب",
+                    callback_data=f"student:{message.sender_telegram_id}",
+                )
+            ]
+        )
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None

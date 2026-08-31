@@ -13,6 +13,7 @@ from app.bot.services import (
     format_collected_message,
     format_filter_list,
     format_lead_notification,
+    lead_notification_keyboard,
     message_keyboard,
     parse_filter_command,
     parse_filter_values,
@@ -165,3 +166,47 @@ def test_lead_notification_contains_required_sender_and_repeat_details() -> None
     assert "الحساب 1، الحساب 2" in rendered
     assert "كرر الطالب نفس الطلب في 2 مجموعات" in rendered
     assert "سبب الالتقاط: يسوي" in rendered
+
+
+def test_lead_keyboard_keeps_message_link_when_sender_has_no_username() -> None:
+    message = CollectedMessage(
+        id=uuid.uuid4(),
+        telegram_group_id=uuid.uuid4(),
+        telegram_message_id=11,
+        sender_telegram_id=6670747046,
+        sender_username=None,
+        text="محتاج مساعدة في واجب",
+        normalized_text="محتاج مساعده في واجب",
+        message_date=datetime(2026, 8, 31, 18, 18, tzinfo=UTC),
+        source_account_id=uuid.uuid4(),
+        content_hash="a" * 64,
+        original_message_link="https://t.me/c/123456/11",
+    )
+
+    keyboard = lead_notification_keyboard(message)
+
+    assert keyboard is not None
+    assert keyboard.inline_keyboard[0][0].url == "https://t.me/c/123456/11"
+    assert keyboard.inline_keyboard[1][0].callback_data == "student:6670747046"
+
+
+def test_lead_keyboard_opens_sender_by_username_when_available() -> None:
+    message = CollectedMessage(
+        id=uuid.uuid4(),
+        telegram_group_id=uuid.uuid4(),
+        telegram_message_id=12,
+        sender_telegram_id=123456789,
+        sender_username="student_name",
+        text="محتاج مشروع",
+        normalized_text="محتاج مشروع",
+        message_date=datetime(2026, 8, 31, 18, 18, tzinfo=UTC),
+        source_account_id=uuid.uuid4(),
+        content_hash="b" * 64,
+        original_message_link="https://t.me/example/12",
+    )
+
+    keyboard = lead_notification_keyboard(message)
+
+    assert keyboard is not None
+    assert keyboard.inline_keyboard[0][0].url == "https://t.me/example/12"
+    assert keyboard.inline_keyboard[1][0].url == "https://t.me/student_name"

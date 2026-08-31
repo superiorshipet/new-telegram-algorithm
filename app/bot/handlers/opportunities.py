@@ -266,6 +266,23 @@ def create_opportunities_router(
             "تم إيقاف الإشعارات. يمكنك استخدام الأوامر يدويًا، و/start يعيد تفعيلها."
         )
 
+    @router.callback_query(F.data.startswith("student:"))
+    async def student_details_callback(callback: CallbackQuery) -> None:
+        async with session_factory() as session:
+            user = await _registered_user(session, callback.from_user.id)
+        if user is None:
+            await callback.answer("استخدم /start أولًا.", show_alert=True)
+            return
+        telegram_user_id = (callback.data or "").partition(":")[2]
+        if not telegram_user_id.isdecimal():
+            await callback.answer("بيانات الطالب غير صالحة.", show_alert=True)
+            return
+        await callback.answer(
+            f"Telegram User ID: {telegram_user_id}\n"
+            "لا يوجد Username متاح لفتح الحساب مباشرة.",
+            show_alert=True,
+        )
+
     @router.callback_query(F.data.startswith("save:"))
     async def save_callback(callback: CallbackQuery) -> None:
         await _change_saved_state(callback, session_factory, save=True)
