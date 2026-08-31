@@ -95,7 +95,9 @@ menu automatically. Open the bot in a private chat and send `/start` to register
 ## Bot commands
 
 - `/start` registers a new user or reactivates notifications for an existing user.
-- `/filters` lists current keywords and displays usage help.
+- `/filters` opens an interactive menu. Press `Add`, send words or phrases separated by
+  new lines, English commas, or Arabic commas, review the preview, then press `Add` again
+  to save them.
 - `/filters add Python, .NET, تصميم مواقع` adds up to 20 unique keywords or phrases.
 - `/filters remove Python` removes one or more comma-separated filters.
 - `/filters clear` removes every filter.

@@ -1,4 +1,5 @@
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
 from app.bot.handlers import create_opportunities_router, create_registration_router
@@ -12,7 +13,7 @@ async def run() -> None:
     configure_logging(settings.log_level)
     database = Database(settings)
     bot = Bot(token=settings.require_bot_token())
-    dispatcher = Dispatcher()
+    dispatcher = Dispatcher(storage=MemoryStorage())
     dispatcher.include_router(create_registration_router(database.session_factory))
     dispatcher.include_router(create_opportunities_router(database.session_factory))
 

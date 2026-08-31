@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC
 
@@ -8,8 +9,74 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from app.database.models import CollectedMessage
 from app.filtering import normalize_arabic
 
-MAX_FILTERS_PER_USER = 20
 MAX_FILTER_LENGTH = 100
+_FILTER_SEPARATOR = re.compile(r"[,،\n]+")
+
+DEFAULT_FILTER_KEYWORDS = (
+    "يسوي",
+    "تسوي",
+    "بحث",
+    "بحوث",
+    "مشروع",
+    "مشاريع",
+    "واجب",
+    "واجبات",
+    "احتاج",
+    "محتاج",
+    "يحتاج",
+    "تحتاج",
+    "تعرفون",
+    "يعرف",
+    "يشرح",
+    "تشرح",
+    "فاهم",
+    "يفهم",
+    "خصوصي",
+    "خاص",
+    "مبرمج",
+    "يبرمج",
+    "يصمم",
+    "مصمم",
+    "يرسم",
+    "برنامج",
+    "يحل",
+    "تحل",
+    "يساعد",
+    "تساعد",
+    "مساعد",
+    "خبرة",
+    "اكسل",
+    "excel",
+    "يعدل",
+    "تعدل",
+    "يلخص",
+    "تلخص",
+    "تلخيص",
+    "تفضل",
+    "تفضلي",
+    "ابشر",
+    "ابشري",
+    "ابي",
+    "ابغى",
+    "تقرير",
+    "تقارير",
+    "عرض",
+    "برزنتيشن",
+    "برزتيشن",
+    "بريزنتيشن",
+    "سيفي",
+    "cv",
+    "سيره ذاتيه",
+    "سيره الذاتيه",
+    "تكليف",
+    "تكاليف",
+    "فكره",
+    "افكار",
+    "حد",
+    "تعال",
+    "تعالي",
+    "عندي",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,8 +98,12 @@ def parse_filter_command(arguments: str | None) -> FilterCommand:
             "استخدم /filters add كلمة، كلمة أخرى أو /filters remove كلمة أو /filters clear"
         )
 
+    return FilterCommand(action=action, keywords=parse_filter_values(raw_keywords))
+
+
+def parse_filter_values(raw_keywords: str) -> list[tuple[str, str]]:
     unique: dict[str, str] = {}
-    for raw_keyword in raw_keywords.split(","):
+    for raw_keyword in _FILTER_SEPARATOR.split(raw_keywords):
         keyword = " ".join(raw_keyword.split())
         normalized = normalize_arabic(keyword)
         if not normalized:
@@ -43,9 +114,60 @@ def parse_filter_command(arguments: str | None) -> FilterCommand:
 
     if not unique:
         raise ValueError("أضف كلمة أو عبارة واحدة على الأقل.")
-    return FilterCommand(
-        action=action,
-        keywords=[(keyword, normalized) for normalized, keyword in unique.items()],
+    return [(keyword, normalized) for normalized, keyword in unique.items()]
+
+
+def default_filter_values() -> list[tuple[str, str]]:
+    return [
+        (keyword, normalize_arabic(keyword)) for keyword in DEFAULT_FILTER_KEYWORDS
+    ]
+
+
+def format_filter_list(
+    keywords: list[str], *, max_characters: int = 3000
+) -> str:
+    lines: list[str] = []
+    used_characters = 0
+    for keyword in keywords:
+        line = f"• {keyword}"
+        if used_characters + len(line) + 1 > max_characters:
+            break
+        lines.append(line)
+        used_characters += len(line) + 1
+
+    remaining = len(keywords) - len(lines)
+    if remaining:
+        lines.append(f"… و{remaining} فلتر آخر")
+    return "\n".join(lines)
+
+
+def filters_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="➕ Add",
+                    callback_data="filters:add:start",
+                )
+            ]
+        ]
+    )
+
+
+def filters_confirmation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Add",
+                    callback_data="filters:add:confirm",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Cancel",
+                    callback_data="filters:add:cancel",
+                ),
+            ]
+        ]
     )
 
 

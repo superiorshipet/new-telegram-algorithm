@@ -5,9 +5,12 @@ import pytest
 
 from app.bot.services import (
     MAX_FILTERS_PER_USER,
+    filters_confirmation_keyboard,
+    filters_menu_keyboard,
     format_collected_message,
     message_keyboard,
     parse_filter_command,
+    parse_filter_values,
 )
 from app.database.models import CollectedMessage, TelegramGroup
 
@@ -22,6 +25,16 @@ def test_add_filter_command_normalizes_and_deduplicates_keywords() -> None:
     parsed = parse_filter_command("add  Python,  إِعْلَان, python ")
     assert parsed.action == "add"
     assert parsed.keywords == [("Python", "python"), ("إِعْلَان", "اعلان")]
+
+
+def test_filter_values_accept_newlines_and_both_comma_styles() -> None:
+    parsed = parse_filter_values("Python developer\n.NET، تصميم مواقع,React")
+    assert parsed == [
+        ("Python developer", "python developer"),
+        (".NET", ".net"),
+        ("تصميم مواقع", "تصميم مواقع"),
+        ("React", "react"),
+    ]
 
 
 def test_remove_and_clear_filter_commands_are_supported() -> None:
@@ -70,3 +83,12 @@ def test_message_format_and_buttons_include_expected_actions() -> None:
     assert "مطلوب مطور Python" in rendered
     assert latest_keyboard.inline_keyboard[0][0].callback_data == f"save:{message.id}"
     assert saved_keyboard.inline_keyboard[0][0].callback_data == f"unsave:{message.id}"
+
+
+def test_filter_keyboards_expose_add_confirm_and_cancel_actions() -> None:
+    menu = filters_menu_keyboard()
+    confirmation = filters_confirmation_keyboard()
+
+    assert menu.inline_keyboard[0][0].callback_data == "filters:add:start"
+    assert confirmation.inline_keyboard[0][0].callback_data == "filters:add:confirm"
+    assert confirmation.inline_keyboard[0][1].callback_data == "filters:add:cancel"

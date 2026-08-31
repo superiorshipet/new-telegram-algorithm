@@ -14,3 +14,6 @@ class BotUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true"), index=True
     )
+    default_filters_seeded: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
