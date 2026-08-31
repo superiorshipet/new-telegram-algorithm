@@ -43,10 +43,10 @@ def test_each_source_account_can_observe_same_message_only_once() -> None:
     )
 
 
-def test_only_one_outbox_notification_exists_per_message() -> None:
+def test_only_one_outbox_notification_exists_per_message_and_recipient() -> None:
     constraints = {
         tuple(column.name for column in constraint.columns)
         for constraint in NotificationOutbox.__table__.constraints
         if isinstance(constraint, UniqueConstraint)
     }
-    assert ("collected_message_id",) in constraints
+    assert ("collected_message_id", "bot_user_id") in constraints

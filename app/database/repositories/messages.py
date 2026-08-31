@@ -2,11 +2,12 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, literal, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import (
+    BotUser,
     CollectedMessage,
     MessageObservation,
     NotificationOutbox,
@@ -109,10 +110,15 @@ class MessageRepository:
         ).scalar_one_or_none() is not None
 
         if message_inserted:
+            recipients = select(
+                literal(message_id),
+                BotUser.id,
+                func.now() + text("interval '1 second'"),
+            ).where(BotUser.is_active.is_(True))
             await self._session.execute(
-                insert(NotificationOutbox).values(
-                    collected_message_id=message_id,
-                    available_at=func.now() + text("interval '1 second'"),
+                insert(NotificationOutbox).from_select(
+                    ["collected_message_id", "bot_user_id", "available_at"],
+                    recipients,
                 )
             )
 

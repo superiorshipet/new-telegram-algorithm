@@ -7,14 +7,11 @@ from datetime import UTC, datetime
 
 import asyncpg
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot.services import format_lead_notification, lead_notification_keyboard
-from app.database.repositories import (
-    BotFeatureRepository,
-    BotUserRepository,
-    NotificationRepository,
-)
+from app.database.repositories import BotFeatureRepository, NotificationRepository
 from app.filtering import classify_lead
 
 logger = logging.getLogger(__name__)
@@ -26,12 +23,10 @@ class NotificationDispatcher:
         bot: Bot,
         session_factory: async_sessionmaker[AsyncSession],
         database_url: str,
-        owner_telegram_id: int,
     ) -> None:
         self._bot = bot
         self._session_factory = session_factory
         self._database_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
-        self._owner_telegram_id = owner_telegram_id
         self._wake = asyncio.Event()
 
     async def run(self, stop_event: asyncio.Event) -> None:
@@ -81,17 +76,18 @@ class NotificationDispatcher:
                     return False
                 outbox_id = outbox.id
                 message = await repository.load_message(outbox.collected_message_id)
-                owner = await BotUserRepository(session).get_by_telegram_id(self._owner_telegram_id)
-                if message is None or owner is None or not owner.is_active:
+                recipient = await repository.load_recipient(outbox.bot_user_id)
+                if message is None or recipient is None or not recipient.is_active:
                     await repository.mark_skipped(outbox.id)
                     return True
 
-                filters = await BotFeatureRepository(session).list_keywords(owner.id)
+                filters = await BotFeatureRepository(session).list_keywords(recipient.id)
                 match = classify_lead(
                     message.normalized_text,
                     [item.normalized_keyword for item in filters],
                 )
                 await repository.save_classification(
+                    outbox.id,
                     message.id,
                     is_lead=match.is_lead,
                     score=match.score,
@@ -108,17 +104,28 @@ class NotificationDispatcher:
                     0,
                     int((datetime.now(UTC) - message.message_date).total_seconds() * 1000),
                 )
-                await self._bot.send_message(
-                    chat_id=owner.telegram_chat_id,
-                    text=format_lead_notification(
-                        message,
-                        observer_names=observer_names,
-                        repeated_group_count=repeated_group_count,
-                        matched_keywords=match.matched_keywords,
-                        latency_ms=latency_ms,
-                    ),
-                    reply_markup=lead_notification_keyboard(message),
+                notification_text = format_lead_notification(
+                    message,
+                    observer_names=observer_names,
+                    repeated_group_count=repeated_group_count,
+                    matched_keywords=match.matched_keywords,
+                    latency_ms=latency_ms,
                 )
+                try:
+                    await self._bot.send_message(
+                        chat_id=recipient.telegram_chat_id,
+                        text=notification_text,
+                        reply_markup=lead_notification_keyboard(message),
+                    )
+                except TelegramBadRequest:
+                    logger.warning(
+                        "notification_keyboard_rejected",
+                        extra={"outbox_id": str(outbox.id)},
+                    )
+                    await self._bot.send_message(
+                        chat_id=recipient.telegram_chat_id,
+                        text=notification_text,
+                    )
                 await repository.mark_sent(outbox.id, latency_ms)
 
             logger.info(

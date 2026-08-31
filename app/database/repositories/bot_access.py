@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import re
 from dataclasses import dataclass
 
 from sqlalchemy import select, update
@@ -26,7 +27,7 @@ def parse_access_subject(raw_value: str) -> AccessSubject:
     value = raw_value.strip()
     if value.startswith("@"):
         username = value[1:].strip().casefold()
-        if not username or not username.replace("_", "").isalnum():
+        if re.fullmatch(r"[a-z0-9_]{5,32}", username) is None:
             raise ValueError("اكتب Username صحيحًا مثل @username")
         return AccessSubject("username", username)
     if value.isdecimal() and int(value) > 0:

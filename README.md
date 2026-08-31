@@ -87,6 +87,11 @@ command per service:
 | bot-worker | `python -m app.bot` | `DATABASE_URL`, `BOT_TOKEN`, `BOT_OWNER_TELEGRAM_ID` |
 | collector-worker | `python -m app.collector` | `DATABASE_URL`, `MASTER_ENCRYPTION_KEY` |
 
+The bot worker also requires `BOT_ACCESS_PASSWORD`. Only the owner can open `/access`,
+grant or revoke access by Telegram User ID or `@username`, and confirm changes with this
+password. Each authorized user gets independent filters, saved messages, and notification
+delivery.
+
 Use Railway's private `DATABASE_URL` for both workers. Run `alembic upgrade head` as a
 one-off deployment command before starting the workers. Do not run migrations concurrently
 from both workers.

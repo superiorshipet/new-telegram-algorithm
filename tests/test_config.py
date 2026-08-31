@@ -25,6 +25,8 @@ def test_service_specific_secrets_are_optional_until_worker_start() -> None:
         settings.require_bot_token()
     with pytest.raises(RuntimeError, match="BOT_OWNER_TELEGRAM_ID"):
         settings.require_bot_owner_telegram_id()
+    with pytest.raises(RuntimeError, match="BOT_ACCESS_PASSWORD"):
+        settings.require_bot_access_password()
     with pytest.raises(RuntimeError, match="MASTER_ENCRYPTION_KEY"):
         settings.require_encryption_key()
     with pytest.raises(RuntimeError, match="TG_API_ID"):
@@ -55,3 +57,13 @@ def test_valid_telegram_api_values_are_returned() -> None:
     )
 
     assert settings.require_telegram_api_values() == (12345, api_hash)
+
+
+def test_bot_access_password_is_loaded_as_a_secret() -> None:
+    settings = Settings(
+        database_url="postgresql://user:pass@db/app",
+        bot_access_password="strong-test-password",
+        _env_file=None,
+    )
+
+    assert settings.require_bot_access_password() == "strong-test-password"

@@ -16,20 +16,22 @@ async def run() -> None:
     configure_logging(settings.log_level)
     database = Database(settings)
     owner_telegram_id = settings.require_bot_owner_telegram_id()
+    access_password = settings.require_bot_access_password()
     bot = Bot(token=settings.require_bot_token())
     dispatcher = Dispatcher(storage=MemoryStorage())
     dispatcher.include_router(
-        create_registration_router(database.session_factory, owner_telegram_id)
+        create_registration_router(
+            database.session_factory,
+            owner_telegram_id,
+            access_password,
+        )
     )
-    dispatcher.include_router(
-        create_opportunities_router(database.session_factory, owner_telegram_id)
-    )
+    dispatcher.include_router(create_opportunities_router(database.session_factory))
     stop_event = asyncio.Event()
     notification_dispatcher = NotificationDispatcher(
         bot,
         database.session_factory,
         settings.sqlalchemy_database_url,
-        owner_telegram_id,
     )
     notification_task = asyncio.create_task(
         notification_dispatcher.run(stop_event),

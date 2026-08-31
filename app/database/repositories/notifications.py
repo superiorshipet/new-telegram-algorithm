@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.database.models import (
+    BotUser,
     CollectedMessage,
     MessageObservation,
     NotificationOutbox,
@@ -37,6 +38,9 @@ class NotificationRepository:
             .options(joinedload(CollectedMessage.group))
         )
 
+    async def load_recipient(self, bot_user_id: uuid.UUID) -> BotUser | None:
+        return await self._session.get(BotUser, bot_user_id)
+
     async def observer_names(self, message_id: uuid.UUID) -> list[str]:
         result = await self._session.scalars(
             select(distinct(SourceAccount.name))
@@ -61,6 +65,7 @@ class NotificationRepository:
 
     async def save_classification(
         self,
+        outbox_id: uuid.UUID,
         message_id: uuid.UUID,
         *,
         is_lead: bool,
@@ -69,11 +74,22 @@ class NotificationRepository:
         reason: str,
     ) -> None:
         await self._session.execute(
+            update(NotificationOutbox)
+            .where(NotificationOutbox.id == outbox_id)
+            .values(
+                is_lead=is_lead,
+                matched_keywords=matched_keywords,
+                match_reason=reason or None,
+            )
+        )
+        if not is_lead:
+            return
+        await self._session.execute(
             update(CollectedMessage)
             .where(CollectedMessage.id == message_id)
             .values(
-                is_lead=is_lead,
-                preliminary_score=score,
+                is_lead=True,
+                preliminary_score=func.greatest(CollectedMessage.preliminary_score, score),
                 matched_keywords=matched_keywords,
                 match_reason=reason or None,
             )

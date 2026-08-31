@@ -3,8 +3,18 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -18,13 +28,23 @@ class NotificationOutbox(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "status",
             "available_at",
         ),
+        UniqueConstraint(
+            "collected_message_id",
+            "bot_user_id",
+            name="uq_notification_outbox_message_user",
+        ),
     )
 
     collected_message_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("collected_messages.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True,
+    )
+    bot_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("bot_users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default=text("'pending'")
@@ -36,3 +56,8 @@ class NotificationOutbox(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     last_error_code: Mapped[str | None] = mapped_column(String(120))
+    is_lead: Mapped[bool | None] = mapped_column(Boolean)
+    matched_keywords: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    match_reason: Mapped[str | None] = mapped_column(Text)

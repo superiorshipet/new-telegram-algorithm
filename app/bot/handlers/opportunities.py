@@ -36,12 +36,9 @@ async def _registered_user(session: AsyncSession, telegram_user_id: int) -> BotU
 
 def create_opportunities_router(
     session_factory: async_sessionmaker[AsyncSession],
-    owner_telegram_id: int,
 ) -> Router:
     router = Router(name="opportunities")
     router.message.filter(F.chat.type == "private")
-    router.message.filter(F.from_user.id == owner_telegram_id)
-    router.callback_query.filter(F.from_user.id == owner_telegram_id)
 
     @router.message(Command("filters"))
     async def filters_command(message: Message, command: CommandObject, state: FSMContext) -> None:
