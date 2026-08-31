@@ -29,3 +29,29 @@ def test_service_specific_secrets_are_optional_until_worker_start() -> None:
         settings.require_encryption_key()
     with pytest.raises(RuntimeError, match="TG_API_ID"):
         settings.require_session_generation_values()
+    with pytest.raises(RuntimeError, match="TG_API_ID"):
+        settings.require_telegram_api_values()
+
+
+def test_telegram_api_hash_must_be_exactly_32_hex_characters() -> None:
+    settings = Settings(
+        database_url="postgresql://user:pass@db/app",
+        tg_api_id=12345,
+        tg_api_hash="a" * 31,
+        _env_file=None,
+    )
+
+    with pytest.raises(RuntimeError, match="exactly 32 hexadecimal characters"):
+        settings.require_telegram_api_values()
+
+
+def test_valid_telegram_api_values_are_returned() -> None:
+    api_hash = "0123456789abcdef0123456789abcdef"
+    settings = Settings(
+        database_url="postgresql://user:pass@db/app",
+        tg_api_id=12345,
+        tg_api_hash=api_hash,
+        _env_file=None,
+    )
+
+    assert settings.require_telegram_api_values() == (12345, api_hash)

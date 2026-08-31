@@ -66,13 +66,16 @@ trusted local shell, export those values plus `TG_PHONE`, `SOURCE_ACCOUNT_NAME`,
 `DATABASE_URL`, and `MASTER_ENCRYPTION_KEY`, then run:
 
 ```bash
-python -m scripts.generate_session
+python -m scripts.generate_session --name "الحساب 1"
+python -m scripts.generate_session --name "الحساب 2"
 ```
 
 Telethon prompts interactively for the login code and optional two-factor password. The
 script writes the resulting StringSession and API credentials directly to PostgreSQL in
 encrypted form; it never prints the StringSession. Remove the temporary `TG_*` variables
-from the shell afterward.
+from the shell afterward. When `TG_PHONE` is empty, the script asks for the phone number in
+the local terminal so it does not need to be stored in `.env` or shell history. Complete one
+account before starting the next one.
 
 ## Railway deployment
 

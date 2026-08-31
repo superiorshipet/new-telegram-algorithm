@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import string
 from functools import lru_cache
 
 from pydantic import Field, SecretStr, field_validator
@@ -91,6 +92,28 @@ class Settings(BaseSettings):
             raise RuntimeError(f"Missing session settings: {', '.join(missing)}")
         assert self.tg_api_id is not None
         return self.tg_api_id, api_hash, phone, account_name
+
+    def require_telegram_api_values(self) -> tuple[int, str]:
+        api_hash = self.tg_api_hash.get_secret_value() if self.tg_api_hash else ""
+        missing = [
+            name
+            for name, value in (
+                ("TG_API_ID", self.tg_api_id),
+                ("TG_API_HASH", api_hash),
+            )
+            if not value
+        ]
+        if missing:
+            raise RuntimeError(f"Missing Telegram API settings: {', '.join(missing)}")
+        assert self.tg_api_id is not None
+        if self.tg_api_id <= 0:
+            raise RuntimeError("TG_API_ID must be a positive integer")
+        if len(api_hash) != 32 or any(character not in string.hexdigits for character in api_hash):
+            raise RuntimeError(
+                "TG_API_HASH must be exactly 32 hexadecimal characters; "
+                "copy it again from my.telegram.org/apps"
+            )
+        return self.tg_api_id, api_hash
 
 
 @lru_cache(maxsize=1)
