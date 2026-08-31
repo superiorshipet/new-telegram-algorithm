@@ -110,20 +110,24 @@ class MessageRepository:
         ).scalar_one_or_none() is not None
 
         if message_inserted:
-            recipients = select(
-                literal(message_id),
-                BotUser.id,
-                func.now() + text("interval '1 second'"),
-            ).where(BotUser.is_active.is_(True))
-            await self._session.execute(
-                insert(NotificationOutbox).from_select(
-                    ["collected_message_id", "bot_user_id", "available_at"],
-                    recipients,
-                )
-            )
+            await self._session.execute(_notification_outbox_insert(message_id))
 
         return PersistedMessage(
             message_id=message_id,
             message_inserted=message_inserted,
             observation_inserted=observation_inserted,
         )
+
+
+def _notification_outbox_insert(message_id: uuid.UUID):
+    recipients = select(
+        func.gen_random_uuid(),
+        literal(message_id),
+        BotUser.id,
+        func.now() + text("interval '1 second'"),
+    ).where(BotUser.is_active.is_(True))
+    return insert(NotificationOutbox).from_select(
+        ["id", "collected_message_id", "bot_user_id", "available_at"],
+        recipients,
+        include_defaults=False,
+    )
