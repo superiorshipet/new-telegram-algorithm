@@ -31,13 +31,12 @@ before deployment.
    pip install -e '.[dev]'
    ```
 
-2. Export variables locally. `.env` is ignored, but the application deliberately does
-   not auto-load it:
+2. Copy the example file and fill the local values. `.env` is ignored by Git and loaded
+   automatically for local development; real process/Railway variables take precedence:
 
    ```bash
-   export DATABASE_URL='postgresql://USER:PASSWORD@HOST:PORT/DATABASE'
-   export BOT_TOKEN='ROTATED_BOT_TOKEN'
-   export MASTER_ENCRYPTION_KEY='FERNET_KEY'
+   cp .env.example .env
+   chmod 600 .env
    ```
 
    Generate the encryption key once and keep the same value in the collector and session
