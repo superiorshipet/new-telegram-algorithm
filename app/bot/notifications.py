@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -18,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class NotificationDispatcher:
+    # Purge processed rows after this many notifications OR this many seconds,
+    # whichever threshold is hit first.
+    _PURGE_EVERY_N = 1000
+    _PURGE_EVERY_SECONDS = 6 * 60 * 60  # 6 hours
+
     def __init__(
         self,
         bot: Bot,
@@ -28,9 +34,12 @@ class NotificationDispatcher:
         self._session_factory = session_factory
         self._database_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
         self._wake = asyncio.Event()
+        self._processed_since_purge: int = 0
+        self._last_purge_at: float = 0.0  # monotonic seconds
 
     async def run(self, stop_event: asyncio.Event) -> None:
         listener: asyncpg.Connection | None = None
+        self._last_purge_at = time.monotonic()
         try:
             try:
                 listener = await asyncpg.connect(self._database_url, timeout=10)
@@ -45,8 +54,13 @@ class NotificationDispatcher:
             self._wake.set()
             while not stop_event.is_set():
                 while await self._process_next():
+                    self._processed_since_purge += 1
+                    if self._processed_since_purge >= self._PURGE_EVERY_N:
+                        await self._maybe_purge()
                     if stop_event.is_set():
                         break
+                # Also purge on the idle path (time-based trigger)
+                await self._maybe_purge()
                 self._wake.clear()
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=1)
@@ -55,6 +69,32 @@ class NotificationDispatcher:
         finally:
             if listener is not None:
                 await listener.close()
+
+    async def _maybe_purge(self) -> None:
+        """Purge processed outbox rows when the count or time threshold is met."""
+        elapsed = time.monotonic() - self._last_purge_at
+        if (
+            self._processed_since_purge < self._PURGE_EVERY_N
+            and elapsed < self._PURGE_EVERY_SECONDS
+        ):
+            return
+        try:
+            async with self._session_factory() as session, session.begin():
+                outbox_del, msg_del = await NotificationRepository(session).purge_processed_rows()
+            logger.info(
+                "outbox_purge_complete",
+                extra={"outbox_deleted": outbox_del, "messages_deleted": msg_del},
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - purge is best-effort
+            logger.error(
+                "outbox_purge_failed",
+                extra={"error_code": type(exc).__name__},
+            )
+        finally:
+            self._processed_since_purge = 0
+            self._last_purge_at = time.monotonic()
 
     def _notification_received(
         self,

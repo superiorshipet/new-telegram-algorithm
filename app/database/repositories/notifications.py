@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import distinct, func, select, update
+from sqlalchemy import delete, distinct, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -127,3 +127,55 @@ class NotificationRepository:
             row.status = "failed"
         else:
             row.available_at = datetime.now(UTC) + timedelta(seconds=min(2**attempts, 60))
+
+    async def purge_processed_rows(
+        self,
+        *,
+        outbox_retention_days: int = 1,
+        message_retention_days: int = 2,
+    ) -> tuple[int, int]:
+        """Delete stale outbox rows and orphaned collected_messages.
+
+        Returns (outbox_deleted, messages_deleted).
+
+        Strategy
+        --------
+        1. Delete notification_outbox rows whose status is terminal
+           (sent / skipped / failed) and whose updated_at is older than
+           *outbox_retention_days*.  This is the main driver of disk growth.
+
+        2. Delete collected_messages whose created_at is older than
+           *message_retention_days* AND that have NO remaining outbox rows
+           with a non-terminal status ('pending').  The notification_outbox FK
+           has ON DELETE CASCADE, so any residual outbox rows are removed too.
+        """
+        outbox_cutoff = datetime.now(UTC) - timedelta(days=outbox_retention_days)
+        message_cutoff = datetime.now(UTC) - timedelta(days=message_retention_days)
+
+        # -- Step 1: purge terminal outbox rows --
+        outbox_result = await self._session.execute(
+            delete(NotificationOutbox)
+            .where(
+                NotificationOutbox.status.in_(["sent", "skipped", "failed"]),
+                NotificationOutbox.updated_at < outbox_cutoff,
+            )
+            .returning(NotificationOutbox.id)
+        )
+        outbox_deleted = len(outbox_result.all())
+
+        # -- Step 2: purge old collected_messages with no pending outbox rows --
+        # Sub-select: message IDs that still have at least one pending outbox row.
+        pending_message_ids = select(NotificationOutbox.collected_message_id).where(
+            NotificationOutbox.status == "pending"
+        )
+        msg_result = await self._session.execute(
+            delete(CollectedMessage)
+            .where(
+                CollectedMessage.created_at < message_cutoff,
+                CollectedMessage.id.not_in(pending_message_ids),
+            )
+            .returning(CollectedMessage.id)
+        )
+        messages_deleted = len(msg_result.all())
+
+        return outbox_deleted, messages_deleted
