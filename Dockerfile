@@ -12,10 +12,13 @@ COPY pyproject.toml README.md ./
 COPY app ./app
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
+COPY entrypoint.sh ./entrypoint.sh
 
-RUN pip install --upgrade pip && pip install .
+RUN pip install --upgrade pip && pip install . \
+    && chmod +x ./entrypoint.sh
 
 USER app
 
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["python", "-m", "app.bot"]
 
