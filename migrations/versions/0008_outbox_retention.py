@@ -28,12 +28,12 @@ def upgrade() -> None:
 
     # Index to speed up retention cleanup on collected_messages by ingest time.
     op.create_index(
-        "ix_collected_messages_created_at",
+        "ix_collected_messages_collected_at",
         "collected_messages",
-        ["created_at"],
+        ["collected_at"],
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_collected_messages_created_at", table_name="collected_messages")
+    op.drop_index("ix_collected_messages_collected_at", table_name="collected_messages")
     op.drop_index("ix_notification_outbox_status_updated_at", table_name="notification_outbox")

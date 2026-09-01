@@ -171,7 +171,7 @@ class NotificationRepository:
         msg_result = await self._session.execute(
             delete(CollectedMessage)
             .where(
-                CollectedMessage.created_at < message_cutoff,
+                CollectedMessage.collected_at < message_cutoff,
                 CollectedMessage.id.not_in(pending_message_ids),
             )
             .returning(CollectedMessage.id)
