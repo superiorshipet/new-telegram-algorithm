@@ -12,6 +12,7 @@ from app.database.models import (
     CollectedMessage,
     MessageObservation,
     NotificationOutbox,
+    SavedMessage,
     SourceAccount,
 )
 
@@ -131,8 +132,8 @@ class NotificationRepository:
     async def purge_processed_rows(
         self,
         *,
-        outbox_retention_days: int = 1,
-        message_retention_days: int = 2,
+        outbox_retention_hours: int = 6,
+        message_retention_hours: int = 6,
     ) -> tuple[int, int]:
         """Delete stale outbox rows and orphaned collected_messages.
 
@@ -142,15 +143,14 @@ class NotificationRepository:
         --------
         1. Delete notification_outbox rows whose status is terminal
            (sent / skipped / failed) and whose updated_at is older than
-           *outbox_retention_days*.  This is the main driver of disk growth.
+           *outbox_retention_hours*.
 
-        2. Delete collected_messages whose created_at is older than
-           *message_retention_days* AND that have NO remaining outbox rows
-           with a non-terminal status ('pending').  The notification_outbox FK
-           has ON DELETE CASCADE, so any residual outbox rows are removed too.
+        2. Delete collected_messages whose collected_at is older than
+           *message_retention_hours* AND that have NO remaining outbox rows
+           with a non-terminal status ('pending') and are not bookmarked in saved_messages.
         """
-        outbox_cutoff = datetime.now(UTC) - timedelta(days=outbox_retention_days)
-        message_cutoff = datetime.now(UTC) - timedelta(days=message_retention_days)
+        outbox_cutoff = datetime.now(UTC) - timedelta(hours=outbox_retention_hours)
+        message_cutoff = datetime.now(UTC) - timedelta(hours=message_retention_hours)
 
         # -- Step 1: purge terminal outbox rows --
         outbox_result = await self._session.execute(
@@ -163,16 +163,18 @@ class NotificationRepository:
         )
         outbox_deleted = len(outbox_result.all())
 
-        # -- Step 2: purge old collected_messages with no pending outbox rows --
+        # -- Step 2: purge old collected_messages with no pending outbox rows or saved bookmarks --
         # Sub-select: message IDs that still have at least one pending outbox row.
         pending_message_ids = select(NotificationOutbox.collected_message_id).where(
             NotificationOutbox.status == "pending"
         )
+        saved_message_ids = select(SavedMessage.collected_message_id)
         msg_result = await self._session.execute(
             delete(CollectedMessage)
             .where(
                 CollectedMessage.collected_at < message_cutoff,
                 CollectedMessage.id.not_in(pending_message_ids),
+                CollectedMessage.id.not_in(saved_message_ids),
             )
             .returning(CollectedMessage.id)
         )
