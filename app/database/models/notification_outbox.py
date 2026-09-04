@@ -28,6 +28,12 @@ class NotificationOutbox(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "status",
             "available_at",
         ),
+        Index(
+            "ix_notification_outbox_pending_dispatch",
+            "available_at",
+            "created_at",
+            postgresql_where=text("status = 'pending' AND attempts < 10"),
+        ),
         UniqueConstraint(
             "collected_message_id",
             "bot_user_id",

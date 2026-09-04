@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -27,7 +29,8 @@ class CollectorClientManager:
         self._session_factory = session_factory
         self._cipher = cipher
         self._queue = queue
-        self._clients: list[TelegramClient] = []
+        self._clients: dict[uuid.UUID, TelegramClient] = {}
+        self._reconcile_lock = asyncio.Lock()
 
     async def start_enabled(self) -> int:
         async with self._session_factory() as session:
@@ -36,6 +39,34 @@ class CollectorClientManager:
         for account in accounts:
             await self._start_account(account)
         return len(self._clients)
+
+    async def run_reconciler(
+        self,
+        stop_event: asyncio.Event,
+        *,
+        interval_seconds: float = 5,
+    ) -> None:
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+            except TimeoutError:
+                await self.reconcile_enabled()
+
+    async def reconcile_enabled(self) -> None:
+        async with self._reconcile_lock:
+            async with self._session_factory() as session:
+                enabled_accounts = await SourceAccountRepository(session).list_enabled()
+            enabled_by_id = {account.id: account for account in enabled_accounts}
+
+            for account_id, client in list(self._clients.items()):
+                if account_id in enabled_by_id and client.is_connected():
+                    continue
+                await self._disconnect_client(client)
+                self._clients.pop(account_id, None)
+
+            for account_id, account in enabled_by_id.items():
+                if account_id not in self._clients:
+                    await self._start_account(account)
 
     async def _start_account(self, account: SourceAccount) -> None:
         client: TelegramClient | None = None
@@ -46,7 +77,7 @@ class CollectorClientManager:
             client = TelegramClient(StringSession(string_session), api_id, api_hash)
             client.add_event_handler(
                 create_new_message_handler(account.id, self._queue),
-                events.NewMessage(incoming=True),
+                events.NewMessage(),
             )
             await client.connect()
             if not await client.is_user_authorized():
@@ -59,7 +90,7 @@ class CollectorClientManager:
                 return
 
             await self._set_status(account, "connected", connected=True)
-            self._clients.append(client)
+            self._clients[account.id] = client
             logger.info(
                 "source_account_connected",
                 extra={"source_account_id": str(account.id)},
@@ -85,7 +116,11 @@ class CollectorClientManager:
             )
         except Exception as exc:  # noqa: BLE001 - account isolation boundary
             await self._disconnect_failed_client(client)
-            await self._set_status(account, "error")
+            await self._set_status(
+                account,
+                "error",
+                flood_wait_until=datetime.now(UTC) + timedelta(minutes=1),
+            )
             logger.error(
                 "source_account_connection_failed error_code=%s",
                 type(exc).__name__,
@@ -106,6 +141,16 @@ class CollectorClientManager:
                 type(exc).__name__,
             )
 
+    @staticmethod
+    async def _disconnect_client(client: TelegramClient) -> None:
+        try:
+            await client.disconnect()
+        except Exception as exc:  # noqa: BLE001 - account isolation boundary
+            logger.error(
+                "source_account_disconnect_failed",
+                extra={"error_code": type(exc).__name__},
+            )
+
     async def _set_status(
         self,
         account: SourceAccount,
@@ -124,12 +169,6 @@ class CollectorClientManager:
             await session.commit()
 
     async def disconnect_all(self) -> None:
-        for client in self._clients:
-            try:
-                await client.disconnect()
-            except Exception as exc:  # noqa: BLE001 - shutdown must continue
-                logger.error(
-                    "source_account_disconnect_failed",
-                    extra={"error_code": type(exc).__name__},
-                )
+        for client in self._clients.values():
+            await self._disconnect_client(client)
         self._clients.clear()

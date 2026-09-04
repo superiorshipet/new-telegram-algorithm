@@ -39,6 +39,11 @@ class CollectedMessage(UUIDPrimaryKeyMixin, Base):
         Index("ix_collected_messages_content_hash", "content_hash"),
         Index("ix_collected_messages_message_date", "message_date"),
         Index(
+            "ix_collected_messages_lead_message_date",
+            sql_text("message_date DESC"),
+            postgresql_where=sql_text("is_lead = true"),
+        ),
+        Index(
             "ix_collected_messages_sender_fingerprint",
             "sender_telegram_id",
             "text_fingerprint",

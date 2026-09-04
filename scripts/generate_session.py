@@ -3,14 +3,12 @@ from __future__ import annotations
 import asyncio
 from argparse import ArgumentParser
 
-from sqlalchemy import func
-from sqlalchemy.dialects.postgresql import insert
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
 from app.common.config import get_settings
 from app.common.crypto import SecretCipher
-from app.database.models import SourceAccount
+from app.database.repositories import MAX_ACTIVE_SOURCE_ACCOUNTS, SourceAccountRepository
 from app.database.session import Database
 
 
@@ -59,28 +57,17 @@ async def run() -> None:
     database = Database(settings)
     try:
         async with database.session_factory() as session:
-            statement = insert(SourceAccount).values(
+            result = await SourceAccountRepository(session).save_authenticated(
                 name=account_name,
                 phone_number_masked=mask_phone(phone),
                 session_string_encrypted=cipher.encrypt(session_string),
                 api_id_encrypted=cipher.encrypt(api_id_text),
                 api_hash_encrypted=cipher.encrypt(api_hash),
-                is_active=True,
-                status="pending",
             )
-            statement = statement.on_conflict_do_update(
-                index_elements=[SourceAccount.name],
-                set_={
-                    "phone_number_masked": statement.excluded.phone_number_masked,
-                    "session_string_encrypted": statement.excluded.session_string_encrypted,
-                    "api_id_encrypted": statement.excluded.api_id_encrypted,
-                    "api_hash_encrypted": statement.excluded.api_hash_encrypted,
-                    "is_active": True,
-                    "status": "pending",
-                    "updated_at": func.now(),
-                },
-            )
-            await session.execute(statement)
+            if result.limit_reached:
+                raise RuntimeError(
+                    f"Cannot activate more than {MAX_ACTIVE_SOURCE_ACCOUNTS} source accounts"
+                )
             await session.commit()
     finally:
         await database.dispose()

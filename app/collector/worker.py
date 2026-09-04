@@ -37,9 +37,16 @@ async def run() -> None:
             started,
             extra={"connected_accounts": started},
         )
+        reconcile_task = asyncio.create_task(
+            manager.run_reconciler(stop_event),
+            name="source-account-reconciler",
+        )
         await stop_event.wait()
     finally:
         logger.info("collector_stopping")
+        stop_event.set()
+        if "reconcile_task" in locals():
+            await asyncio.gather(reconcile_task, return_exceptions=True)
         await manager.disconnect_all()
         await queue.join()
         writer_task.cancel()

@@ -18,6 +18,15 @@ def test_request_phrase_and_keyword_create_a_lead() -> None:
     assert result.score >= 4
 
 
+def test_from_whom_request_phrase_creates_a_lead() -> None:
+    text = normalize_arabic("من يسوي بوت")
+    result = classify_lead(text, normalized_default_keywords())
+
+    assert result.is_lead is True
+    assert "من يسوي" in result.matched_keywords
+    assert "يسوي" in result.matched_intents
+
+
 def test_keyword_without_request_context_does_not_alert() -> None:
     text = normalize_arabic("هذا مشروع جميل تم عرضه في الجامعة")
     result = classify_lead(text, normalized_default_keywords())

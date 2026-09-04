@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 class AccessStates(StatesGroup):
     waiting_for_subject = State()
+    waiting_for_role = State()
     waiting_for_password = State()
 
 
@@ -36,11 +37,33 @@ def owner_access_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="➕ منح صلاحية", callback_data="access:add")],
             [InlineKeyboardButton(text="👥 الصلاحيات الحالية", callback_data="access:list")],
+            [InlineKeyboardButton(text="📥 حسابات التجميع", callback_data="accounts:menu")],
         ]
     )
 
 
-def access_list_keyboard(grants: list[BotAccessGrant]) -> InlineKeyboardMarkup:
+def access_role_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="👤 مستخدم عادي",
+                    callback_data="access:role:user",
+                ),
+                InlineKeyboardButton(
+                    text="🛡 مشرف",
+                    callback_data="access:role:admin",
+                ),
+            ]
+        ]
+    )
+
+
+def access_list_keyboard(
+    grants: list[BotAccessGrant],
+    *,
+    allow_admin_management: bool,
+) -> InlineKeyboardMarkup:
     rows = [
         [
             InlineKeyboardButton(
@@ -54,6 +77,7 @@ def access_list_keyboard(grants: list[BotAccessGrant]) -> InlineKeyboardMarkup:
             )
         ]
         for grant in grants
+        if allow_admin_management or not grant.is_access_admin
     ]
     rows.append([InlineKeyboardButton(text="➕ منح صلاحية", callback_data="access:add")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -93,6 +117,34 @@ def create_registration_router(
                 await user_repository.mark_default_filters_seeded(user.id, DEFAULT_FILTER_VERSION)
             await session.commit()
         return default_count
+
+    async def save_access_grant(
+        message: Message,
+        state: FSMContext,
+        subject: AccessSubject,
+        *,
+        is_access_admin: bool,
+    ) -> None:
+        async with session_factory() as session:
+            await BotAccessRepository(session).grant(
+                subject,
+                message.from_user.id,
+                is_access_admin=is_access_admin,
+            )
+            await session.commit()
+        await state.clear()
+        logger.info(
+            "bot_access_granted",
+            extra={
+                "subject_type": subject.subject_type,
+                "is_access_admin": is_access_admin,
+            },
+        )
+        role_text = "مشرف" if is_access_admin else "مستخدم"
+        await message.answer(
+            f"تمت إضافة {subject.display} كـ{role_text}. يمكنه الآن إرسال /start.",
+            reply_markup=owner_access_keyboard(),
+        )
 
     @router.message(CommandStart())
     async def start(message: Message) -> None:
@@ -167,8 +219,38 @@ def create_registration_router(
             access_subject_type=subject.subject_type,
             access_subject_value=subject.subject_value,
         )
+        if message.from_user.id == owner_telegram_id:
+            await state.set_state(AccessStates.waiting_for_role)
+            await message.answer(
+                "اختر نوع الصلاحية:",
+                reply_markup=access_role_keyboard(),
+            )
+            return
+
+        await save_access_grant(
+            message,
+            state,
+            subject,
+            is_access_admin=False,
+        )
+
+    @router.callback_query(AccessStates.waiting_for_role, F.data.startswith("access:role:"))
+    async def select_access_role(callback: CallbackQuery, state: FSMContext) -> None:
+        if callback.from_user.id != owner_telegram_id:
+            await state.clear()
+            await callback.answer("تعيين المشرفين متاح للمالك فقط.", show_alert=True)
+            return
+        role = (callback.data or "").rsplit(":", 1)[-1]
+        if role not in {"user", "admin"}:
+            await callback.answer("نوع صلاحية غير صالح.", show_alert=True)
+            return
+        await state.update_data(access_is_admin=role == "admin")
         await state.set_state(AccessStates.waiting_for_password)
-        await message.answer("أدخل كلمة سر إدارة الصلاحيات لتأكيد الإذن:")
+        await callback.answer()
+        await callback.bot.send_message(
+            callback.from_user.id,
+            "أدخل كلمة سر إدارة الصلاحيات لتأكيد الإذن:",
+        )
 
     @router.message(AccessStates.waiting_for_password, F.text)
     async def confirm_access_grant(message: Message, state: FSMContext) -> None:
@@ -187,19 +269,17 @@ def create_registration_router(
         data = await state.get_data()
         subject_type = data.get("access_subject_type")
         subject_value = data.get("access_subject_value")
+        is_access_admin = data.get("access_is_admin", False)
         if not isinstance(subject_type, str) or not isinstance(subject_value, str):
             await state.clear()
             await message.answer("انتهت العملية. افتح /access وحاول مرة أخرى.")
             return
         subject = AccessSubject(subject_type, subject_value)
-        async with session_factory() as session:
-            await BotAccessRepository(session).grant(subject, message.from_user.id)
-            await session.commit()
-        await state.clear()
-        logger.info("bot_access_granted", extra={"subject_type": subject.subject_type})
-        await message.answer(
-            f"تم منح الصلاحية إلى {subject.display}. يمكنه الآن إرسال /start.",
-            reply_markup=owner_access_keyboard(),
+        await save_access_grant(
+            message,
+            state,
+            subject,
+            is_access_admin=bool(is_access_admin),
         )
 
     @router.callback_query(F.data == "access:list")
@@ -214,7 +294,10 @@ def create_registration_router(
         await callback.bot.send_message(
             callback.from_user.id,
             text,
-            reply_markup=access_list_keyboard(grants),
+            reply_markup=access_list_keyboard(
+                grants,
+                allow_admin_management=callback.from_user.id == owner_telegram_id,
+            ),
         )
 
     @router.callback_query(F.data.startswith("access:revoke:"))
@@ -228,6 +311,14 @@ def create_registration_router(
             await callback.answer("طلب غير صالح.", show_alert=True)
             return
         async with session_factory() as session:
+            grant = await session.get(BotAccessGrant, grant_id)
+            if (
+                grant is not None
+                and grant.is_access_admin
+                and callback.from_user.id != owner_telegram_id
+            ):
+                await callback.answer("إلغاء المشرفين متاح للمالك فقط.", show_alert=True)
+                return
             revoked = await BotAccessRepository(session).revoke(grant_id)
             await session.commit()
         await callback.answer("تم إلغاء الصلاحية." if revoked else "الصلاحية غير موجودة.")
@@ -236,9 +327,12 @@ def create_registration_router(
 
     @router.message(Command("help"))
     async def help_command(message: Message) -> None:
-        access_help = ""
+        management_help = ""
         if message.from_user and await can_manage_access(message.from_user.id):
-            access_help = "\n/access — إدارة المستخدمين المصرح لهم"
+            management_help = (
+                "\n/access — إدارة المستخدمين المصرح لهم"
+                "\n/accounts — إدارة حسابات التجميع"
+            )
         await message.answer(
             "/start — تسجيل الحساب أو إعادة تفعيله\n"
             "/filters — إدارة كلمات وعبارات البحث\n"
@@ -246,7 +340,7 @@ def create_registration_router(
             "/saved — الرسائل المحفوظة\n"
             "/status — حالة الحساب\n"
             "/stop — إيقاف الإشعارات\n"
-            f"/help — عرض الأوامر{access_help}"
+            f"/help — عرض الأوامر{management_help}"
         )
 
     return router

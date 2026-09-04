@@ -80,7 +80,7 @@ class Settings(BaseSettings):
 
     def require_encryption_key(self) -> str:
         if self.master_encryption_key is None or not self.master_encryption_key.get_secret_value():
-            raise RuntimeError("MASTER_ENCRYPTION_KEY is required by the collector worker")
+            raise RuntimeError("MASTER_ENCRYPTION_KEY is required by Telegram account workers")
         return self.master_encryption_key.get_secret_value()
 
     def require_session_generation_values(self) -> tuple[int, str, str, str]:

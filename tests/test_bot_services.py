@@ -74,7 +74,8 @@ def test_requested_default_filters_are_normalized_and_unique() -> None:
     assert ("مشروع", "مشروع") in defaults
     assert ("excel", "excel") in defaults
     assert ("سيره الذاتيه", "سيره الذاتيه") in defaults
-    assert DEFAULT_FILTER_VERSION == 2
+    assert ("من يسوي", "من يسوي") in defaults
+    assert DEFAULT_FILTER_VERSION == 3
 
 
 def test_existing_users_receive_only_new_default_filter_version() -> None:
@@ -84,6 +85,12 @@ def test_existing_users_receive_only_new_default_filter_version() -> None:
     assert "يسويلي" in normalized
     assert "مين يسوي" in normalized
     assert "بحث" not in normalized
+
+
+def test_existing_version_two_users_receive_from_whom_request_phrase() -> None:
+    version_three = default_filter_values_since(2)
+
+    assert version_three == [("من يسوي", "من يسوي")]
 
 
 def test_filter_list_display_is_bounded_without_dropping_saved_values() -> None:

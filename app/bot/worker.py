@@ -4,9 +4,14 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
-from app.bot.handlers import create_opportunities_router, create_registration_router
+from app.bot.handlers import (
+    create_accounts_router,
+    create_opportunities_router,
+    create_registration_router,
+)
 from app.bot.notifications import NotificationDispatcher
 from app.common.config import get_settings
+from app.common.crypto import SecretCipher
 from app.common.logging import configure_logging
 from app.database.session import Database
 
@@ -17,6 +22,8 @@ async def run() -> None:
     database = Database(settings)
     owner_telegram_id = settings.require_bot_owner_telegram_id()
     access_password = settings.require_bot_access_password()
+    cipher = SecretCipher(settings.require_encryption_key())
+    api_id, api_hash = settings.require_telegram_api_values()
     bot = Bot(token=settings.require_bot_token())
     dispatcher = Dispatcher(storage=MemoryStorage())
     dispatcher.include_router(
@@ -24,6 +31,15 @@ async def run() -> None:
             database.session_factory,
             owner_telegram_id,
             access_password,
+        )
+    )
+    dispatcher.include_router(
+        create_accounts_router(
+            database.session_factory,
+            owner_telegram_id,
+            cipher,
+            api_id,
+            api_hash,
         )
     )
     dispatcher.include_router(create_opportunities_router(database.session_factory))
@@ -42,6 +58,7 @@ async def run() -> None:
         await bot.set_my_commands(
             [
                 BotCommand(command="start", description="Register or reactivate your account"),
+                BotCommand(command="accounts", description="Manage collection accounts"),
                 BotCommand(command="filters", description="Manage your interests and filters"),
                 BotCommand(command="latest", description="View latest matching opportunities"),
                 BotCommand(command="saved", description="View saved opportunities"),

@@ -4,7 +4,7 @@ import re
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,7 +62,19 @@ class BotAccessRepository:
                 | statement.excluded.is_access_admin,
             },
         )
-        return (await self._session.execute(statement.returning(BotAccessGrant))).scalar_one()
+        grant = (await self._session.execute(statement.returning(BotAccessGrant))).scalar_one()
+        if is_access_admin:
+            user_filter = (
+                BotUser.telegram_user_id == int(subject.subject_value)
+                if subject.subject_type == "telegram_id"
+                else func.lower(BotUser.username) == subject.subject_value
+            )
+            await self._session.execute(
+                update(BotUser)
+                .where(user_filter)
+                .values(is_active=True, is_access_admin=True, updated_at=func.now())
+            )
+        return grant
 
     async def authorize_and_bind(
         self, telegram_user_id: int, username: str | None
@@ -111,10 +123,18 @@ class BotAccessRepository:
         if grant is None or not grant.is_active:
             return False
         grant.is_active = False
-        if grant.subject_type == "telegram_id":
-            await self._session.execute(
-                update(BotUser)
-                .where(BotUser.telegram_user_id == int(grant.subject_value))
-                .values(is_active=False)
+        user_filter = (
+            BotUser.telegram_user_id == int(grant.subject_value)
+            if grant.subject_type == "telegram_id"
+            else func.lower(BotUser.username) == grant.subject_value
+        )
+        await self._session.execute(
+            update(BotUser)
+            .where(user_filter)
+            .values(
+                is_active=False,
+                is_access_admin=False,
+                updated_at=func.now(),
             )
+        )
         return True

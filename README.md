@@ -84,13 +84,16 @@ command per service:
 
 | Service | Start command | Required variables |
 | --- | --- | --- |
-| bot-worker | `python -m app.bot` | `DATABASE_URL`, `BOT_TOKEN`, `BOT_OWNER_TELEGRAM_ID` |
+| bot-worker | `python -m app.bot` | `DATABASE_URL`, `BOT_TOKEN`, `BOT_OWNER_TELEGRAM_ID`, `BOT_ACCESS_PASSWORD`, `MASTER_ENCRYPTION_KEY`, `TG_API_ID`, `TG_API_HASH` |
 | collector-worker | `python -m app.collector` | `DATABASE_URL`, `MASTER_ENCRYPTION_KEY` |
 
-The bot worker also requires `BOT_ACCESS_PASSWORD`. Only the owner can open `/access`,
-grant or revoke access by Telegram User ID or `@username`, and confirm changes with this
-password. Each authorized user gets independent filters, saved messages, and notification
-delivery.
+The bot worker also requires `BOT_ACCESS_PASSWORD`. The owner can use `/access` to add a
+Telegram User ID or `@username` as either a regular user or an access administrator.
+Delegated administrators can add and revoke regular users, but only the owner can appoint
+or revoke another administrator. Owner changes are confirmed with the management password;
+a delegated administrator is authenticated by their Telegram identity and can manage regular
+users without receiving the owner's password. Each authorized user gets independent filters,
+saved messages, and notification delivery.
 
 Use Railway's private `DATABASE_URL` for both workers. Run `alembic upgrade head` as a
 one-off deployment command before starting the workers. Do not run migrations concurrently
@@ -103,6 +106,9 @@ menu automatically. Open the bot in a private chat and send `/start` to register
 ## Bot commands
 
 - `/start` registers a new user or reactivates notifications for an existing user.
+- `/accounts` lets the owner and delegated administrators add up to three active collection
+  accounts using QR or phone verification, inspect their connection state, and start or stop
+  them without redeploying either worker.
 - `/filters` opens an interactive menu. Press `Add`, send words or phrases separated by
   new lines, English commas, or Arabic commas, review the preview, then press `Add` again
   to save them.
@@ -119,14 +125,16 @@ menu automatically. Open the bot in a private chat and send `/start` to register
 Messages returned by `/latest` contain a save button and, when available, a link to the
 original Telegram message. Saved results contain a remove button.
 
-On the first `/start` after the default-filter migration, the bot adds the built-in Arabic
-lead keywords once. Users can remove or replace them; removed defaults are not recreated
-on later `/start` commands.
+Schema migrations add new versioned default phrases to existing users, while `/start`
+seeds any missing filter versions for newly registered or returning users. Users can still
+remove or replace filters after seeding.
 
 ## Realtime detection and deduplication
 
-Collectors use Telegram `NewMessage` events; they never scan every group on a timer. Each
-source account runs concurrently and event handlers place work into a bounded queue.
+Collectors use Telegram `NewMessage` events for incoming and outgoing group messages; they
+never scan every group on a timer. Each source account runs concurrently and event handlers
+place work into a bounded queue. The collector reconciles database account changes every five
+seconds, so bot-managed additions and start/stop actions take effect without a redeploy.
 
 - The unique Telegram identity is `(group, message_id)`. If two source accounts see that
   exact message, one message row and one notification are created while both observations
@@ -139,13 +147,15 @@ source account runs concurrently and event handlers place work into a bounded qu
 - Every new message creates a durable outbox task. PostgreSQL `LISTEN/NOTIFY` wakes the bot
   immediately, while a one-second recovery poll ensures pending work is still delivered
   after restarts or listener interruption.
-- Classification requires both a configured keyword and request intent/context. The score,
-  matched keywords, and reason are stored on the message for auditability.
+- Classification is deterministic and uses only configured keywords plus request
+  intent/context rules; no AI provider is involved. The score, matched keywords, and reason
+  are stored on the message for auditability.
 
 ## Production security checklist
 
-- Set `BOT_OWNER_TELEGRAM_ID` to the immutable ID of the only authorized viewer. Commands,
-  callbacks, and realtime notifications are restricted to this ID.
+- Set `BOT_OWNER_TELEGRAM_ID` to the immutable ID of the system owner. The owner controls
+  delegated access; commands, callbacks, and realtime notifications remain restricted to
+  active authorized Telegram identities.
 - Rotate every credential that has appeared in chat or screenshots before deployment.
 - Keep Telegram API credentials, session strings, bot tokens, phone numbers, and database
   URLs out of Git. Source-account credentials and StringSessions are encrypted at rest with
