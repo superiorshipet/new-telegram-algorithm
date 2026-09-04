@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -45,6 +46,14 @@ class MessageQueue:
                         "telegram_message_id": item.telegram_message_id,
                         "message_inserted": result.message_inserted,
                         "observation_inserted": result.observation_inserted,
+                        "persistence_latency_ms": max(
+                            0,
+                            int(
+                                (datetime.now(UTC) - item.message_date).total_seconds()
+                                * 1000
+                            ),
+                        ),
+                        "queue_depth": self._queue.qsize(),
                     },
                 )
                 return

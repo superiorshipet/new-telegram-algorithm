@@ -48,6 +48,7 @@ async def run() -> None:
         bot,
         database.session_factory,
         settings.sqlalchemy_database_url,
+        concurrency=settings.notification_dispatch_concurrency,
     )
     notification_task = asyncio.create_task(
         notification_dispatcher.run(stop_event),

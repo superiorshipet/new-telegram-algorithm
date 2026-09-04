@@ -13,3 +13,5 @@ def test_outbox_insert_generates_a_distinct_database_uuid_for_each_recipient() -
     assert "gen_random_uuid()" in compiled_sql
     assert "(id, collected_message_id, bot_user_id, available_at)" in compiled_sql
     assert "%(id)s::UUID" not in compiled_sql
+    assert "now()" in compiled_sql
+    assert "interval '1 second'" not in compiled_sql

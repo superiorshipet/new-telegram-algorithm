@@ -29,10 +29,13 @@ class NotificationDispatcher:
         bot: Bot,
         session_factory: async_sessionmaker[AsyncSession],
         database_url: str,
+        *,
+        concurrency: int = 8,
     ) -> None:
         self._bot = bot
         self._session_factory = session_factory
         self._database_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        self._concurrency = concurrency
         self._wake = asyncio.Event()
         self._processed_since_purge: int = 0
         self._last_purge_at: float = 0.0  # monotonic seconds
@@ -53,15 +56,15 @@ class NotificationDispatcher:
 
             self._wake.set()
             while not stop_event.is_set():
-                while await self._process_next():
-                    self._processed_since_purge += 1
+                self._wake.clear()
+                while processed := await self._process_ready_batch():
+                    self._processed_since_purge += processed
                     if self._processed_since_purge >= self._PURGE_EVERY_N:
                         await self._maybe_purge()
                     if stop_event.is_set():
                         break
                 # Also purge on the idle path (time-based trigger)
                 await self._maybe_purge()
-                self._wake.clear()
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=1)
                 except TimeoutError:
@@ -106,6 +109,19 @@ class NotificationDispatcher:
         del connection, process_id, channel, payload
         self._wake.set()
 
+    async def _process_ready_batch(self) -> int:
+        # Probe once so the one-second recovery poll costs one query while idle.
+        # Only fan out when work exists, keeping backlog throughput high without
+        # creating constant database load during quiet periods.
+        if not await self._process_next():
+            return 0
+        if self._concurrency == 1:
+            return 1
+        results = await asyncio.gather(
+            *(self._process_next() for _ in range(self._concurrency - 1))
+        )
+        return 1 + sum(results)
+
     async def _process_next(self) -> bool:
         outbox_id: uuid.UUID | None = None
         try:
@@ -144,6 +160,10 @@ class NotificationDispatcher:
                     0,
                     int((datetime.now(UTC) - message.message_date).total_seconds() * 1000),
                 )
+                collector_latency_ms = max(
+                    0,
+                    int((message.collected_at - message.message_date).total_seconds() * 1000),
+                )
                 notification_text = format_lead_notification(
                     message,
                     observer_names=observer_names,
@@ -173,6 +193,8 @@ class NotificationDispatcher:
                 extra={
                     "outbox_id": str(outbox_id),
                     "latency_ms": latency_ms,
+                    "collector_latency_ms": collector_latency_ms,
+                    "dispatch_latency_ms": max(0, latency_ms - collector_latency_ms),
                 },
             )
             return True

@@ -24,7 +24,10 @@ async def run() -> None:
         SecretCipher(settings.require_encryption_key()),
         queue,
     )
-    writer_task = asyncio.create_task(queue.run_writer(), name="database-writer")
+    writer_tasks = [
+        asyncio.create_task(queue.run_writer(), name=f"database-writer-{index + 1}")
+        for index in range(settings.collector_writer_concurrency)
+    ]
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signal_name in (signal.SIGINT, signal.SIGTERM):
@@ -49,7 +52,8 @@ async def run() -> None:
             await asyncio.gather(reconcile_task, return_exceptions=True)
         await manager.disconnect_all()
         await queue.join()
-        writer_task.cancel()
-        await asyncio.gather(writer_task, return_exceptions=True)
+        for writer_task in writer_tasks:
+            writer_task.cancel()
+        await asyncio.gather(*writer_tasks, return_exceptions=True)
         await database.dispose()
         logger.info("collector_stopped")

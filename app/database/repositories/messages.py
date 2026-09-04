@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func, literal, select, text
+from sqlalchemy import func, literal, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -124,7 +124,7 @@ def _notification_outbox_insert(message_id: uuid.UUID):
         func.gen_random_uuid(),
         literal(message_id),
         BotUser.id,
-        func.now() + text("interval '1 second'"),
+        func.now(),
     ).where(BotUser.is_active.is_(True))
     return insert(NotificationOutbox).from_select(
         ["id", "collected_message_id", "bot_user_id", "available_at"],

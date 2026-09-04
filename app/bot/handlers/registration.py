@@ -15,7 +15,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.bot.services import DEFAULT_FILTER_VERSION, default_filter_values_since
-from app.database.models import BotAccessGrant
+from app.database.models import BotAccessGrant, BotUser
 from app.database.repositories import (
     BotAccessRepository,
     BotFeatureRepository,
@@ -32,14 +32,38 @@ class AccessStates(StatesGroup):
     waiting_for_password = State()
 
 
-def owner_access_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="➕ منح صلاحية", callback_data="access:add")],
-            [InlineKeyboardButton(text="👥 الصلاحيات الحالية", callback_data="access:list")],
-            [InlineKeyboardButton(text="📥 حسابات التجميع", callback_data="accounts:menu")],
-        ]
-    )
+def owner_access_keyboard(*, allow_admin_management: bool = True) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="➕ منح صلاحية", callback_data="access:add")],
+        [InlineKeyboardButton(text="👥 الصلاحيات الحالية", callback_data="access:list")],
+    ]
+    if allow_admin_management:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="⭐ ترقية حساب موجود لمشرف",
+                    callback_data="access:promote",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="📥 حسابات التجميع", callback_data="accounts:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def promotable_users_keyboard(users: list[BotUser]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for user in users:
+        identity = f"@{user.username}" if user.username else str(user.telegram_user_id)
+        label = " — ".join(part for part in (user.first_name, identity) if part)
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"⭐ {label}",
+                    callback_data=f"access:promote:{user.telegram_user_id}",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def access_role_keyboard() -> InlineKeyboardMarkup:
@@ -143,7 +167,9 @@ def create_registration_router(
         role_text = "مشرف" if is_access_admin else "مستخدم"
         await message.answer(
             f"تمت إضافة {subject.display} كـ{role_text}. يمكنه الآن إرسال /start.",
-            reply_markup=owner_access_keyboard(),
+            reply_markup=owner_access_keyboard(
+                allow_admin_management=message.from_user.id == owner_telegram_id
+            ),
         )
 
     @router.message(CommandStart())
@@ -180,7 +206,11 @@ def create_registration_router(
         await message.answer(
             f"تم تسجيل حسابك وتفعيل الإشعارات.{default_message} "
             "استخدم /filters لإدارة اهتماماتك.",
-            reply_markup=owner_access_keyboard() if is_access_admin else None,
+            reply_markup=(
+                owner_access_keyboard(allow_admin_management=is_owner)
+                if is_access_admin
+                else None
+            ),
         )
 
     @router.message(Command("access"))
@@ -189,7 +219,61 @@ def create_registration_router(
             await message.answer("إدارة الصلاحيات متاحة للمشرفين فقط.")
             return
         await state.clear()
-        await message.answer("إدارة المستخدمين المصرح لهم:", reply_markup=owner_access_keyboard())
+        await message.answer(
+            "إدارة المستخدمين المصرح لهم:",
+            reply_markup=owner_access_keyboard(
+                allow_admin_management=message.from_user.id == owner_telegram_id
+            ),
+        )
+
+    @router.callback_query(F.data == "access:promote")
+    async def list_promotable_users(callback: CallbackQuery, state: FSMContext) -> None:
+        if callback.from_user.id != owner_telegram_id:
+            await callback.answer("ترقية المشرفين متاحة للمالك فقط.", show_alert=True)
+            return
+        async with session_factory() as session:
+            users = await BotUserRepository(session).list_promotable()
+        await state.clear()
+        await callback.answer()
+        if not users:
+            await callback.bot.send_message(
+                callback.from_user.id,
+                "لا توجد حسابات عادية مسجلة متاحة للترقية.",
+            )
+            return
+        await callback.bot.send_message(
+            callback.from_user.id,
+            "اختر الحساب الذي تريد ترقيته إلى مشرف:",
+            reply_markup=promotable_users_keyboard(users),
+        )
+
+    @router.callback_query(F.data.startswith("access:promote:"))
+    async def select_user_promotion(callback: CallbackQuery, state: FSMContext) -> None:
+        if callback.from_user.id != owner_telegram_id:
+            await callback.answer("ترقية المشرفين متاحة للمالك فقط.", show_alert=True)
+            return
+        try:
+            telegram_user_id = int((callback.data or "").rsplit(":", 1)[-1])
+        except ValueError:
+            await callback.answer("حساب غير صالح.", show_alert=True)
+            return
+        async with session_factory() as session:
+            user = await BotUserRepository(session).get_by_telegram_id(telegram_user_id)
+        if user is None or user.is_access_admin:
+            await callback.answer("الحساب غير متاح للترقية.", show_alert=True)
+            return
+        await state.clear()
+        await state.update_data(
+            access_subject_type="telegram_id",
+            access_subject_value=str(telegram_user_id),
+            access_is_admin=True,
+        )
+        await state.set_state(AccessStates.waiting_for_password)
+        await callback.answer()
+        await callback.bot.send_message(
+            callback.from_user.id,
+            "أدخل كلمة سر إدارة الصلاحيات لتأكيد ترقية الحساب إلى مشرف:",
+        )
 
     @router.callback_query(F.data == "access:add")
     async def start_access_grant(callback: CallbackQuery, state: FSMContext) -> None:

@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     master_encryption_key: SecretStr | None = None
     log_level: str = "INFO"
     collector_queue_size: int = Field(default=1000, ge=1, le=100_000)
+    collector_writer_concurrency: int = Field(default=4, ge=1, le=16)
+    notification_dispatch_concurrency: int = Field(default=8, ge=1, le=32)
     db_pool_size: int = Field(default=5, ge=1, le=100)
     db_max_overflow: int = Field(default=10, ge=0, le=100)
     tg_api_id: int | None = None

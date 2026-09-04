@@ -2,8 +2,13 @@ import uuid
 
 import pytest
 
-from app.bot.handlers.registration import access_list_keyboard, access_role_keyboard
-from app.database.models import BotAccessGrant
+from app.bot.handlers.registration import (
+    access_list_keyboard,
+    access_role_keyboard,
+    owner_access_keyboard,
+    promotable_users_keyboard,
+)
+from app.database.models import BotAccessGrant, BotUser
 from app.database.repositories.bot_access import parse_access_subject
 
 
@@ -34,6 +39,38 @@ def test_owner_can_choose_user_or_admin_role() -> None:
 
     assert keyboard.inline_keyboard[0][0].callback_data == "access:role:user"
     assert keyboard.inline_keyboard[0][1].callback_data == "access:role:admin"
+
+
+def test_only_owner_menu_exposes_existing_user_promotion() -> None:
+    owner_callbacks = [
+        button.callback_data
+        for row in owner_access_keyboard(allow_admin_management=True).inline_keyboard
+        for button in row
+    ]
+    delegated_callbacks = [
+        button.callback_data
+        for row in owner_access_keyboard(allow_admin_management=False).inline_keyboard
+        for button in row
+    ]
+
+    assert "access:promote" in owner_callbacks
+    assert "access:promote" not in delegated_callbacks
+
+
+def test_promotable_user_button_uses_immutable_telegram_id() -> None:
+    user = BotUser(
+        id=uuid.uuid4(),
+        telegram_user_id=123456789,
+        telegram_chat_id=123456789,
+        username="existing_user",
+        first_name="محمد",
+        is_active=True,
+        is_access_admin=False,
+    )
+
+    keyboard = promotable_users_keyboard([user])
+
+    assert keyboard.inline_keyboard[0][0].callback_data == "access:promote:123456789"
 
 
 def test_delegated_admin_cannot_receive_admin_revoke_button() -> None:

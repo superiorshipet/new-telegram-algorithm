@@ -67,3 +67,26 @@ def test_bot_access_password_is_loaded_as_a_secret() -> None:
     )
 
     assert settings.require_bot_access_password() == "strong-test-password"
+
+
+def test_latency_worker_concurrency_has_safe_defaults() -> None:
+    settings = Settings(database_url="postgresql://user:pass@db/app", _env_file=None)
+
+    assert settings.collector_writer_concurrency == 4
+    assert settings.notification_dispatch_concurrency == 8
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("collector_writer_concurrency", 0),
+        ("notification_dispatch_concurrency", 33),
+    ],
+)
+def test_latency_worker_concurrency_is_bounded(field: str, value: int) -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            database_url="postgresql://user:pass@db/app",
+            _env_file=None,
+            **{field: value},
+        )

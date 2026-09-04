@@ -146,7 +146,10 @@ seconds, so bot-managed additions and start/stop actions take effect without a r
   name are retained only as contact/display snapshots.
 - Every new message creates a durable outbox task. PostgreSQL `LISTEN/NOTIFY` wakes the bot
   immediately, while a one-second recovery poll ensures pending work is still delivered
-  after restarts or listener interruption.
+  after restarts or listener interruption. Ready notifications have no artificial delay;
+  collector persistence uses four bounded writers and notification delivery drains up to
+  eight independent rows concurrently by default. Both limits are configurable through
+  `COLLECTOR_WRITER_CONCURRENCY` and `NOTIFICATION_DISPATCH_CONCURRENCY`.
 - Classification is deterministic and uses only configured keywords plus request
   intent/context rules; no AI provider is involved. The score, matched keywords, and reason
   are stored on the message for auditability.

@@ -47,6 +47,14 @@ class BotUserRepository:
             select(BotUser).where(BotUser.telegram_user_id == telegram_user_id)
         )
 
+    async def list_promotable(self) -> list[BotUser]:
+        result = await self._session.scalars(
+            select(BotUser)
+            .where(BotUser.is_access_admin.is_(False))
+            .order_by(BotUser.first_name, BotUser.username, BotUser.telegram_user_id)
+        )
+        return list(result)
+
     async def set_notifications_active(self, telegram_user_id: int, *, active: bool) -> bool:
         result = await self._session.execute(
             update(BotUser)
